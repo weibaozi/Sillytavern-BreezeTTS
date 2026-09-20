@@ -3,25 +3,29 @@ import { DEFAULT_VOCAL_EVENTS, parseVocalEvents } from './prompt.js';
 const quotePairs = new Map([['“', '”'], ['‘', '’'], ['「', '」'], ['『', '』'], ['"', '"']]);
 
 function knownEvents(vocalEvents) {
-    // The original four remain recognizable when reading older chat messages.
+    // Built-in events remain recognizable when reading older chat messages.
     return new Set(parseVocalEvents(`${DEFAULT_VOCAL_EVENTS}\n${typeof vocalEvents === 'string' ? vocalEvents : ''}`).events);
 }
 
 /** Return plain display text. The caller must insert it with textContent. */
-export function displayDialogue(text, vocalEvents) {
+export function displayDialogue(text, vocalEvents, { streaming = false } = {}) {
     const source = String(text ?? ''), events = knownEvents(vocalEvents);
+    const pairs = { '[': ']', '(': ')' };
     let result = '';
     for (let start = 0; start < source.length;) {
-        if (source[start] !== '[') { result += source[start++]; continue; }
-        let depth = 1, end = start + 1;
-        while (end < source.length && depth) {
-            if (source[end] === '[') depth++;
-            else if (source[end] === ']') depth--;
+        if (!pairs[source[start]]) { result += source[start++]; continue; }
+        const stack = [pairs[source[start]]];
+        let end = start + 1;
+        while (end < source.length && stack.length) {
+            if (pairs[source[end]]) stack.push(pairs[source[end]]);
+            else if (source[end] === stack.at(-1)) stack.pop();
             end++;
         }
         const token = source.slice(start, end);
         // Unknown and nested bracket groups may be ordinary dialogue: keep them intact.
-        if (depth || !events.has(token)) result += token;
+        const pendingEvent = streaming && stack.length && source[start] === '('
+            && [...events].some(event => event[0] === '(' && event.startsWith(token));
+        if (!pendingEvent && (stack.length || !events.has(token))) result += token;
         start = end;
     }
     result = result.trim();

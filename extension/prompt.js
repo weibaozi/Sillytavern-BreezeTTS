@@ -33,7 +33,15 @@ Example (a bound speaker):
 
 Before ending the body or starting any post-body module, silently check the penultimate and final eligible spoken paragraphs, including a final question to {{user}}. Each needs its own adjacent, complete tag. Fix omissions at their original positions; do not collect tags at the end or print the check.`;
 
-export const DEFAULT_VOCAL_EVENTS = '[笑]\n[叹气]\n[咳嗽]\n[清嗓子]';
+export const LEGACY_VOCAL_EVENTS = '[笑]\n[叹气]\n[咳嗽]\n[清嗓子]';
+export const DEFAULT_VOCAL_EVENTS = [
+    '[笑]', '[叹气]', '[咳嗽]', '[清嗓子]',
+    '[大笑]', '[轻笑]', '[窃笑]', '[偷笑]', '[吸气]', '[呼气]', '[深呼吸]', '[喘气]',
+    '[吞咽]', '[咂嘴]', '[哭]', '[抽泣]', '[哽咽]', '[尖叫]', '[惊呼]', '[打哈欠]', '[打喷嚏]', '[哼]', '[停顿]',
+    '(laugh)', '(giggle)', '(chuckle)', '(sigh)', '(cough)', '(clears throat)', '(sniff)', '(gasp)', '(breath)', '(cry)', '(yawn)',
+    '[soft gasps]', '[gasps]', '[breathy sigh]', '[soft moan]', '[whimper]', '[needy moan]', '[breathy pant]',
+    '[low whimper]', '[shaky gasp]', '[low moan]', '[husky sigh]', '[deep pant]', '[throaty hum]',
+].join('\n');
 export const PREVIOUS_DEFAULT_TEMPLATE = LEGACY_DEFAULT_TEMPLATE
     .replace('optionally add audible events at the intended position: {{vocal_events}}. Keep these Chinese tags unchanged.',
         'optionally add only these allowed audible events at the intended position: {{vocal_events}}. Keep event tags unchanged; if none are allowed, add no vocal-event tags.')
@@ -89,12 +97,19 @@ export function parseVocalEvents(value) {
     for (const raw of source.split(/[\r\n,，、;；]+/)) {
         const token = raw.trim();
         if (!token) continue;
-        const label = token.startsWith('[') && token.endsWith(']') ? token.slice(1, -1).trim() : token;
-        if (!label || /[\[\]{}:：\x00-\x1f\x7f]/.test(label)) {
+        // Split adjacent complete tags, but never salvage pieces of a malformed group.
+        const delimited = /[\[\]()]/.test(token);
+        if (delimited && !/^(?:\[[^\[\]()]*\]|\([^\[\]()]*\))(?:\s*(?:\[[^\[\]()]*\]|\([^\[\]()]*\)))*$/.test(token)) {
             invalid.add(token);
             continue;
         }
-        events.add(`[${label}]`);
+        const parts = delimited ? token.match(/\[[^\[\]()]*\]|\([^\[\]()]*\)/g) : [token];
+        const labels = parts.map(part => (delimited ? part.slice(1, -1) : part).trim());
+        if (labels.some(label => !label || /[\[\](){}:：\x00-\x1f\x7f]/.test(label))) {
+            invalid.add(token);
+            continue;
+        }
+        parts.forEach((part, i) => events.add(delimited && part.startsWith('(') ? `(${labels[i]})` : `[${labels[i]}]`));
     }
     return { events: [...events], invalid: [...invalid] };
 }

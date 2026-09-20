@@ -95,8 +95,8 @@ export function createStudioPanel() {
               <section class="surface prompt-guidance-card" aria-labelledby="vocal-events-heading">
                 <div class="guidance-heading"><div><span class="eyebrow">VOCAL EVENTS</span><h3 id="vocal-events-heading">语气词列表</h3></div><span class="editor-chip">所有聊天共用</span></div>
                 <p class="guidance-description">告诉模型可以使用哪些发声标签；修改后自动保存，预览实时更新。</p>
-                <label class="field" for="breeze-vocal-events">允许的语气词<textarea id="breeze-vocal-events" data-vocal-events rows="5" spellcheck="false" placeholder="[笑]&#10;[叹气]&#10;[咳嗽]&#10;[清嗓子]" aria-describedby="vocal-events-help vocal-events-status"></textarea><small id="vocal-events-help">每行一项，默认使用 [笑]、[叹气]、[咳嗽]、[清嗓子]。</small></label>
-                <div class="guidance-footer"><p id="vocal-events-status" class="guidance-status" data-vocal-events-status role="status" aria-live="polite"></p><button class="button quiet" type="button" data-reset-vocal-events>恢复默认四项</button></div>
+                <label class="field" for="breeze-vocal-events">允许的语气词<textarea id="breeze-vocal-events" data-vocal-events rows="8" spellcheck="false" placeholder="[笑]&#10;(laugh)&#10;[breathy sigh]" aria-describedby="vocal-events-help vocal-events-status"></textarea><small id="vocal-events-help">每行一项，也可用逗号分隔。保留 [] 或 () 格式；相邻标签自动拆分，省略括号时补为 []。</small></label>
+                <div class="guidance-footer"><p id="vocal-events-status" class="guidance-status" data-vocal-events-status role="status" aria-live="polite"></p><button class="button quiet" type="button" data-reset-vocal-events>恢复默认列表</button></div>
               </section>
               <section class="surface prompt-guidance-card extra-prompt-card" aria-labelledby="extra-prompt-heading">
                 <div class="guidance-heading"><div><span class="eyebrow">CONVERSATION NOTES</span><h3 id="extra-prompt-heading">额外语料</h3></div><span class="editor-chip">语料库共用</span></div>

@@ -2,7 +2,7 @@ import { KEY, DEFAULTS, parseTTS, parseStreamingTTS, chatKey, discoverSpeakers, 
 import { BreezeClient, checkAbort } from './client.js';
 import { SpeechPlayer } from './player.js';
 import { AutomaticSpeechQueue } from './automatic-queue.js';
-import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
+import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, LEGACY_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
 import { listExtraPresets, createExtraPreset, updateExtraPreset, deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from './extra-prompts.js';
 import { displayDialogue, hasLegacyDialogue } from './dialogue-render.js';
 import { parseNarration } from './narration.js';
@@ -284,7 +284,7 @@ function insertBubbles(container, messageItems, pending = []) {
     const map = textMap(body); let cursor = 0;
     const replacements = [], fallback = [];
     const displayItems = [...messageItems.filter(item => item.segment.kind !== 'narration'), ...pending.map(segment => ({ segment, pending: true,
-        displayText: displayDialogue(segment.text || '', settings.vocalEvents) }))].sort((a, b) => a.segment.start - b.segment.start);
+        displayText: displayDialogue(segment.text || '', settings.vocalEvents, { streaming: true }) }))].sort((a, b) => a.segment.start - b.segment.start);
     for (const item of displayItems) {
         const start = item.pending ? map.text.lastIndexOf(item.segment.raw) : map.text.indexOf(item.segment.raw, cursor);
         if (start < 0) { fallback.push(item); continue; }
@@ -809,8 +809,9 @@ function init() {
     settings = { ...DEFAULTS, ...PROMPT_DEFAULTS, ...ctx.extensionSettings[KEY] };
     settings.promptTemplate = typeof settings.tagRenderPromptTemplate === 'string' ? settings.tagRenderPromptTemplate : DEFAULT_TEMPLATE;
     // The stable template is retained verbatim; only this branch's field is initialized.
-    if (typeof settings.tagRenderPromptTemplate !== 'string') saveSettings();
-    if (typeof settings.vocalEvents !== 'string') settings.vocalEvents = DEFAULT_VOCAL_EVENTS;
+    const upgradeVocalEvents = typeof settings.vocalEvents !== 'string' || settings.vocalEvents === LEGACY_VOCAL_EVENTS;
+    if (upgradeVocalEvents) settings.vocalEvents = DEFAULT_VOCAL_EVENTS;
+    if (typeof settings.tagRenderPromptTemplate !== 'string' || upgradeVocalEvents) saveSettings();
     try { client = new BreezeClient(settings.baseUrl); } catch { settings.baseUrl = DEFAULTS.baseUrl; client = new BreezeClient(settings.baseUrl); }
     buildPanel();
     mountStudioEntry(openPanel);

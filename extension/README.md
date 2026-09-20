@@ -1,4 +1,4 @@
-# Breeze 角色语音 · 0.7.0-tag-render.5（实验版）
+# Breeze 角色语音 · 0.7.0-tag-render.6（实验版）
 
 分支 `experiment/ttsvoice-render` 从 `stable/v0.6.1` / 标签 `v0.6.1` 的提交 `60df1f8` 分出。不要与稳定版并装或同时启用，两者共用设置、事件和提示词 key。已有单份对白版可直接更新同名扩展并刷新酒馆。
 
@@ -19,7 +19,7 @@
 
 开启「显示为对白与气泡」时，不完整标签也会实时隐藏元数据并增量显示对白，但未闭合前不合成。停止、编辑、切换 swipe 或聊天会取消旧队列；代码和原始消息不改。
 
-「预设注入」使用五条英文单份对白规则，动态填入角色和语气词。实验模板保存到 `tagRenderPromptTemplate`，稳定版的 `settings.promptTemplate` 不覆盖。语气词、具名语料库及聊天绑定继续共用；启用有效且非空的聊天语料时追加第六条。
+「预设注入」使用五条英文单份对白规则，动态填入角色和语气词。实验模板保存到 `tagRenderPromptTemplate`，稳定版的 `settings.promptTemplate` 不覆盖。语气词默认 47 项，支持方括号／圆括号及相邻标签拆分；原四项默认自动升级，自定义与清空列表保留。语气词、具名语料库及聊天绑定继续共用；启用有效且非空的聊天语料时追加第六条。
 
 不要同时注入旧的双份规范。TGbreak 其他约束保持原样；源码 `prompts/TGbreak_原思维-格式_单份对白实验版.txt` 只调整其中的 TTS 要求，旧文件保留。插件不会自动修改用户预设。
 
@@ -29,11 +29,13 @@
 .\install.ps1 -SillyTavernPath 'G:\study\AI\SillyTavern-Launcher\SillyTavern' -InstallExperimental
 ```
 
-脚本需要显式实验开关，先备份再替换同名扩展。包名为 `dist/sillytavern-breeze-0.7.0-tag-render.5.zip`；部署应包含 `dialogue-render.js`、`automatic-queue.js` 等全部文件，刷新酒馆生效；旁白克隆还需更新配套后端并重启。
+脚本需要显式实验开关，先备份再替换同名扩展。包名为 `dist/sillytavern-breeze-0.7.0-tag-render.6.zip`；部署应包含 `dialogue-render.js`、`automatic-queue.js` 等全部文件，刷新酒馆生效；旁白克隆还需更新配套后端并重启。
 
 回退时从稳定源码目录重新安装并刷新，原模板仍保留。实验期间创建的单份消息不会自动转成双份；稳定版可能只显示它们的气泡，原文对白仍在。
 
 前版 0.7.0-tag-render.1 通过 70 项单元／DOM 测试、35 项不同浏览器用例及语法检查，使用模拟酒馆与演示音频；本次回归结果以测试记录为准，未验证真实模型遵循率。完整说明见源码 README 与 `docs/单份对白方案.md`。
+
+0.7.0-tag-render.6：默认语气词扩展为 47 项，支持 `[]`／`()`、相邻标签拆分和旧四项默认迁移。104 项单元／DOM 测试、27 项预设／对白浏览器用例与 JavaScript 语法检查通过；新增标签保留在合成文本中，当前版本未逐项试听模型表现。
 
 0.7.0-tag-render.5：100 项插件单元／DOM 测试、14 项旁白浏览器用例、64 项相关 Python 测试及 JavaScript 语法检查通过。验证纯克隆模板无指令 token、CFG 1、两个后端入口的流式／非流式、旧配置默认与缓存隔离；浏览器使用模拟音频，未据此评估真实音色相似度。
 

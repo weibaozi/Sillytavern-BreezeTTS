@@ -65,6 +65,53 @@ test('configured vocal events are hidden only in presentation; other bracketed t
     expect(await rawMessage(page)).toBe(raw);
 });
 
+test('round and square vocal events stay in speech requests while unknown parentheses and nested groups remain visible', async ({ page, request }) => {
+    await openStudio(page, 'prompt');
+    await studio(page).locator('[data-vocal-events]').fill('(quiet laugh)\n[small sigh]');
+    await studio(page).locator('[data-close]').click();
+    const text = '(laugh)[soft gasps]你好。(quiet laugh)[small sigh]等一下(约5分钟)，再看[附注(laugh)]。';
+    const raw = `[TTSVoice:周启明:default:${text}]`;
+    await replaceMessage(page, raw);
+    await expect(body(page)).toContainText('“你好。等一下(约5分钟)，再看[附注(laugh)]。”');
+    expect(await body(page).innerText()).not.toContain('[soft gasps]');
+    expect(await body(page).innerText()).not.toContain('(quiet laugh)');
+    await expect(bubbles(page)).toHaveCount(1);
+    await bubbles(page).click();
+    await expect(bubbles(page)).toHaveAttribute('data-state', 'ready');
+    const state = await (await request.get('/__demo/state')).json();
+    expect(state.requests).toHaveLength(1);
+    expect(state.requests[0].text).toBe(text);
+    expect(await rawMessage(page)).toBe(raw);
+});
+
+test('streamed permitted round-event prefixes stay hidden without hiding unfinished ordinary parentheses', async ({ page, request }) => {
+    await setToggle(page, 'readStreamingText', true);
+    await setToggle(page, 'autoGenerate', true);
+    await page.evaluate(() => window.__breezeDemo.beginStream());
+    const lastBody = page.locator('#chat .mes').last().locator('.mes_text');
+    const lastBubbles = page.locator('#chat .mes').last().locator('.breeze-bubble');
+    let raw = '[TTSVoice:周启明:default:你好(gas';
+    await page.evaluate(text => window.__breezeDemo.streamText(text), raw);
+    await expect(lastBody).toHaveText('“你好', { useInnerText: true });
+    await expect(lastBubbles).toHaveCount(0);
+    expect((await (await request.get('/__demo/state')).json()).requests).toHaveLength(0);
+    raw += 'p)一起走(约5';
+    await page.evaluate(text => window.__breezeDemo.streamText(text), raw);
+    await expect(lastBody).toHaveText('“你好一起走(约5', { useInnerText: true });
+    await expect(lastBubbles).toHaveCount(0);
+    expect((await (await request.get('/__demo/state')).json()).requests).toHaveLength(0);
+    raw += '分钟)[soft gasps]。]';
+    await page.evaluate(text => window.__breezeDemo.streamText(text), raw);
+    await expect(lastBody).toContainText('“你好一起走(约5分钟)。”');
+    await expect(lastBubbles).toHaveCount(1);
+    await page.evaluate(() => window.__breezeDemo.finishStream());
+    await expect(lastBubbles).toHaveAttribute('data-state', 'ready');
+    const state = await (await request.get('/__demo/state')).json();
+    expect(state.requests).toHaveLength(1);
+    expect(state.requests[0].text).toBe('你好(gasp)一起走(约5分钟)[soft gasps]。');
+    expect(await page.evaluate(() => window.__breezeDemo.context.chat.at(-1).mes)).toBe(raw);
+});
+
 test('unmapped characters retain all readable dialogue and clicking their bubble opens binding without generation', async ({ page, request }) => {
     const raw = '沈予安看了看时间。\n[TTSVoice:沈予安:New:记得今晚把选题定下来。]';
     await replaceMessage(page, raw);

@@ -4,6 +4,12 @@ import { KEY, DEFAULTS } from '../extension/core.js';
 import { PROMPT_KEY, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, PROMPT_DEFAULTS, parseVocalEvents, buildVoicePrompt, syncVoicePrompt } from '../extension/prompt.js';
 
 const voices = [{ id: 'voice-1', name: 'PRIVATE_LIBRARY_NAME_1' }, { id: 'voice-2', name: 'PRIVATE_LIBRARY_NAME_2' }];
+const expectedEvents = [
+    '[笑]', '[叹气]', '[咳嗽]', '[清嗓子]',
+    '[大笑]', '[轻笑]', '[窃笑]', '[偷笑]', '[吸气]', '[呼气]', '[深呼吸]', '[喘气]', '[吞咽]', '[咂嘴]', '[哭]', '[抽泣]', '[哽咽]', '[尖叫]', '[惊呼]', '[打哈欠]', '[打喷嚏]', '[哼]', '[停顿]',
+    '(laugh)', '(giggle)', '(chuckle)', '(sigh)', '(cough)', '(clears throat)', '(sniff)', '(gasp)', '(breath)', '(cry)', '(yawn)',
+    '[soft gasps]', '[gasps]', '[breathy sigh]', '[soft moan]', '[whimper]', '[needy moan]', '[breathy pant]', '[low whimper]', '[shaky gasp]', '[low moan]', '[husky sigh]', '[deep pant]', '[throaty hum]',
+];
 const sectionTemplate = [
     'PRIMARY={{primary_character_note}}',
     'BOUND={{bound_characters_section}}',
@@ -39,15 +45,18 @@ function sections(text) {
     }));
 }
 
-test('default English protocol keeps TTSVoice and all four initial vocal events', () => {
+test('default English protocol includes all 47 events while keeping the original four first', () => {
     assert.equal(PROMPT_KEY, 'breeze_voice_protocol');
     assert.equal(PROMPT_DEFAULTS.injectPrompt, true);
     assert.equal(PROMPT_DEFAULTS.promptDepth, 1);
     assert.equal(PROMPT_DEFAULTS.promptTemplate, DEFAULT_TEMPLATE);
     assert.equal(PROMPT_DEFAULTS.vocalEvents, DEFAULT_VOCAL_EVENTS);
+    assert.equal(expectedEvents.length, 47);
+    assert.equal(new Set(expectedEvents).size, 47);
+    assert.deepEqual(parseVocalEvents(DEFAULT_VOCAL_EVENTS), { events: expectedEvents, invalid: [] });
     const text = buildVoicePrompt(context(), settings(), voices);
     assert.match(text, /TTSVoice/);
-    for (const event of ['[笑]', '[叹气]', '[咳嗽]', '[清嗓子]']) assert.ok(text.includes(event), event);
+    for (const event of expectedEvents) assert.ok(text.includes(event), event);
     assert.match(text, /New/);
     assert.doesNotMatch(text, /\{\{(?:primary_character_note|bound_characters_section|skipped_characters_section|unbound_characters_section|vocal_events|vocal_event_example)\}\}/);
 });
@@ -87,13 +96,21 @@ test('vocal events accept lines or common separators, normalize brackets and ded
     assert.deepEqual(parseVocalEvents(' 笑\n[叹气], 咳嗽， [ 清嗓子 ]、笑;吸气；[叹气]\r\n'), {
         events: ['[笑]', '[叹气]', '[咳嗽]', '[清嗓子]', '[吸气]'], invalid: [],
     });
-    const defaults = ['[笑]', '[叹气]', '[咳嗽]', '[清嗓子]'];
-    for (const value of [undefined, null, 42, []]) assert.deepEqual(parseVocalEvents(value).events, defaults);
+    for (const value of [undefined, null, 42, []]) assert.deepEqual(parseVocalEvents(value).events, expectedEvents);
     for (const value of ['', ' \n,； ']) assert.deepEqual(parseVocalEvents(value), { events: [], invalid: [] });
 });
 
+test('event parsing preserves parenthesized labels and splits adjacent complete tags', () => {
+    assert.deepEqual(parseVocalEvents('(laugh)( clears throat ) [whimper][needy moan]\nsoft gasps; (laugh),[soft gasps]'), {
+        events: ['(laugh)', '(clears throat)', '[whimper]', '[needy moan]', '[soft gasps]'], invalid: [],
+    });
+    assert.deepEqual(parseVocalEvents('[gasp](gasp), gasp'), {
+        events: ['[gasp]', '(gasp)'], invalid: [],
+    });
+});
+
 test('malformed or macro-like event labels are reported and omitted from the prompt', () => {
-    const invalid = ['[笑', '咳嗽]', '[[叹气]]', '[]', 'TTSVoice:说话', '情绪：开心', '{{char}}', '笑{宏}', '坏\u0000标签'];
+    const invalid = ['[笑', '咳嗽]', '[[叹气]]', '[]', '(laugh', 'sigh)', '((laugh))', '()', '[laugh)', '(sigh]', '[(laugh)]', '([sigh])', '(laugh[soft])', '[soft(gasp)]', 'TTSVoice:说话', '情绪：开心', '{{char}}', '笑{宏}', '({{char}})', '坏\u0000标签'];
     const value = `${invalid.join('\n')}\n吸气`;
     assert.deepEqual(parseVocalEvents(value), { events: ['[吸气]'], invalid });
     const text = buildVoicePrompt(context(), settings({ vocalEvents: value }), voices);
@@ -106,9 +123,17 @@ test('changing event list updates both rule and example without keeping an old e
     const text = buildVoicePrompt(context(), settings({ vocalEvents: '[吸气]\n低笑' }), voices);
     assert.match(text, /allowed audible events at the intended position: \[吸气\], \[低笑\]/);
     assert.ok(text.includes('[TTSVoice:周启明:softly reassuring:[吸气]等一下。现在可以了。]'));
-    for (const event of parseVocalEvents(DEFAULT_VOCAL_EVENTS).events) assert.ok(!text.includes(event), event);
+    for (const event of expectedEvents.filter(event => event !== '[吸气]')) assert.ok(!text.includes(event), event);
     assert.ok(LEGACY_DEFAULT_TEMPLATE.includes('[TTSVoice:周启明:happy:[笑]等一下。现在可以了。]'));
     assert.ok(!LEGACY_DEFAULT_TEMPLATE.includes('{{vocal_event_example}}'));
+});
+
+test('parenthesized event lists update the rule and example without becoming square-bracket events', () => {
+    const text = buildVoicePrompt(context(), settings({ vocalEvents: '(clears throat)[whimper][needy moan]' }), voices);
+    assert.match(text, /allowed audible events at the intended position: \(clears throat\), \[whimper\], \[needy moan\]/);
+    assert.ok(text.includes('[TTSVoice:周启明:softly reassuring:(clears throat)等一下。现在可以了。]'));
+    assert.ok(!text.includes('[笑]'));
+    assert.ok(!text.includes('[clears throat]'));
 });
 
 test('explicitly empty or wholly invalid event list disables events instead of restoring defaults', () => {

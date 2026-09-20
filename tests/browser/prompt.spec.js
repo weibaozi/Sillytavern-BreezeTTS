@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
+import { DEFAULT_VOCAL_EVENTS } from '../../extension/prompt.js';
 
-const defaults = '[笑]\n[叹气]\n[咳嗽]\n[清嗓子]';
+const defaults = DEFAULT_VOCAL_EVENTS;
+const previousDefaults = '[笑]\n[叹气]\n[咳嗽]\n[清嗓子]';
 const studio = page => page.locator('#breeze-studio-host').locator('dialog');
 const field = (page, name) => studio(page).locator(`[data-${name}]`);
 const injected = page => page.evaluate(() => window.__breezeDemo.context.extensionPrompts.breeze_voice_protocol?.value);
@@ -48,11 +50,14 @@ test.beforeEach(async ({ page, request }) => {
     await openPrompt(page);
 });
 
-test('vocal-event list starts with four defaults and updates both preview and injection live, including empty and reset', async ({ page }) => {
+test('vocal-event list starts with 47 defaults and updates both preview and injection live, including empty and reset', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await expect(field(page, 'vocal-events')).toHaveValue(defaults);
+    expect(defaults.trim().split('\n')).toHaveLength(47);
     await expect.poll(() => field(page, 'prompt-preview').inputValue()).toContain('[笑], [叹气], [咳嗽], [清嗓子]');
+    expect(await injected(page)).toContain('(clears throat)');
+    expect(await injected(page)).toContain('[throaty hum]');
     const template = await field(page, 'prompt-template').inputValue();
     await field(page, 'vocal-events').fill('[喘气]\n[轻笑]');
     await expect.poll(() => field(page, 'prompt-preview').inputValue()).toContain('[喘气], [轻笑]');
@@ -72,9 +77,61 @@ test('vocal-event list starts with four defaults and updates both preview and in
     expect(await injected(page)).toBe(preview);
     await field(page, 'reset-vocal-events').click();
     await expect(field(page, 'vocal-events')).toHaveValue(defaults);
+    expect(await injected(page)).toContain('(clears throat)');
+    expect(await injected(page)).toContain('[throaty hum]');
+    expect(await injected(page)).toContain('[TTSVoice:周启明:softly reassuring:[笑]');
     expect(await injected(page)).toBe(await field(page, 'prompt-preview').inputValue());
     expect(errors).toEqual([]);
 });
+
+test('parenthesized and adjacent vocal events reach the live prompt unchanged while malformed nesting is omitted', async ({ page }) => {
+    const value = '(clears throat)[whimper][needy moan]\n(gasp)\n[wrong)\n[(nested)]\n{{char}}';
+    await field(page, 'vocal-events').fill(value);
+    await expect.poll(() => injected(page)).toContain('(clears throat), [whimper], [needy moan], (gasp)');
+    const preview = await field(page, 'prompt-preview').inputValue();
+    expect(await injected(page)).toBe(preview);
+    expect(preview).toContain('[TTSVoice:周启明:softly reassuring:(clears throat)');
+    expect(preview).not.toContain('[clears throat]');
+    for (const invalid of ['[wrong)', '[(nested)]', '{{char}}', '[笑]']) expect(preview).not.toContain(invalid);
+    await expect(field(page, 'vocal-events')).toHaveAttribute('aria-invalid', 'true');
+    await expect(field(page, 'vocal-events-status')).toContainText('3');
+    await page.reload();
+    await openPrompt(page);
+    await expect(field(page, 'vocal-events')).toHaveValue(value);
+    expect(await injected(page)).toBe(preview);
+});
+
+for (const [label, oldValue, expectedValue] of [
+    ['exact original defaults', previousDefaults, defaults],
+    ['custom list', '(gasp)\n[whimper][needy moan]', '(gasp)\n[whimper][needy moan]'],
+    ['explicitly empty list', '', ''],
+    ['reordered original tags', '[叹气]\n[笑]\n[咳嗽]\n[清嗓子]', '[叹气]\n[笑]\n[咳嗽]\n[清嗓子]'],
+]) {
+    test(`initialization migrates only exact old defaults and preserves ${label}`, async ({ page }) => {
+        const before = await page.evaluate(value => {
+            const demo = window.__breezeDemo;
+            demo.context.extensionSettings.breeze_voice.vocalEvents = value;
+            demo.context.saveSettingsDebounced();
+            return { settings: demo.context.extensionSettings.breeze_voice, metadata: demo.context.chatMetadata };
+        }, oldValue);
+        await page.reload();
+        await openPrompt(page);
+        await expect(field(page, 'vocal-events')).toHaveValue(expectedValue);
+        const after = await page.evaluate(() => ({
+            settings: window.__breezeDemo.context.extensionSettings.breeze_voice,
+            metadata: window.__breezeDemo.context.chatMetadata,
+            persisted: JSON.parse(sessionStorage.getItem('breeze-studio-demo-v1')).settings.breeze_voice,
+        }));
+        expect(after.settings).toEqual({ ...before.settings, vocalEvents: expectedValue });
+        expect(after.persisted).toEqual(after.settings);
+        expect(after.metadata).toEqual(before.metadata);
+        expect(await injected(page)).toBe(await field(page, 'prompt-preview').inputValue());
+        if (expectedValue === '') {
+            expect(await injected(page)).toContain('allowed audible events at the intended position: None');
+            expect(await injected(page)).toContain('[TTSVoice:周启明:softly reassuring:等一下。现在可以了。]');
+        }
+    });
+}
 
 test('saved custom template and unrelated formatting remain intact while vocal events persist through reload', async ({ page }) => {
     const template = 'Keep TGbreak modules unchanged: <w2g>, <catsay>, summary.\nAllowed sounds: {{vocal_events}}\n{{bound_characters_section}}';
