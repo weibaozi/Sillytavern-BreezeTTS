@@ -142,6 +142,8 @@ h2 { font-size: 19px; font-weight: 500; letter-spacing: .4px; } h3 { font-size: 
 .narrator-heading .section-icon { color: #d5c9a3; background: #343a2c; border-color: #555d43; }
 .narrator-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .narrator-fields .field { min-width: 0; margin-bottom: 0; gap: 7px; font-size: 11px; }
+.narrator-fields .narrator-fetch-field { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+.narrator-fetch-field small { grid-column: 1 / -1; }
 .narrator-fields .narrator-emotion-field { grid-column: 1 / -1; }
 .narrator-fields .narrator-target-field { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 88px; align-items: center; gap: 14px; padding-top: 14px; border-top: 1px solid #394331; }
 .narrator-target-field > span { min-width: 0; }
@@ -235,6 +237,7 @@ h2 { font-size: 19px; font-weight: 500; letter-spacing: .4px; } h3 { font-size: 
 }
 @media (max-width: 560px) {
     .narrator-card { padding: 18px; margin-bottom: 22px; }.narrator-fields { grid-template-columns: 1fr; gap: 14px; }
+    .narrator-fields .narrator-fetch-field { grid-template-columns: 1fr; }
     .studio { width: 100vw; height: 100dvh; border-radius: 0; border-width: 0; }.sidebar { padding: 14px 15px 0; }.close-button { right: 15px; }.topbar { padding: 17px 19px; }.topbar p { font-size: 10px; }.page-scroll { padding: 19px; }.chat-hero { padding: 21px 18px; }.chat-hero h2 { font-size: 20px; }.chat-hero p { font-size: 10px; }.chat-hero .eyebrow { font-size: 8px; }.hero-wave { display: none; }
     .stats { margin: 21px 0 25px; }.stats > div { flex-direction: column-reverse; align-items: flex-start; gap: 7px; padding: 0 19px; }.stats span { font-size: 10px; }.stats strong { font-size: 23px; }.section-toolbar { align-items: flex-start; flex-direction: column; gap: 13px; }.section-toolbar p { font-size: 10px; }.search-field { width: 100%; flex-basis: auto; }.character-grid, .voice-grid { grid-template-columns: 1fr; gap: 12px; }.breeze-row { padding: 18px; }.character-head { gap: 12px; }.avatar { width: 42px; height: 42px; flex-basis: 42px; }.character-name { font-size: 14px; }.state-badge { font-size: 9px; padding: 4px 8px; }.character-controls { margin-top: 16px; padding-top: 14px; }.add-character { margin-top: 22px; padding-top: 20px; }
     .design-layout, .prompt-editors, .settings-columns, .two-fields { grid-template-columns: 1fr; }.design-layout { gap: 28px; }.design-form-card { padding: 21px; }.candidate-empty { min-height: 230px; padding: 45px 20px; }.candidate-column .card-heading { margin-bottom: 17px; }.prompt-editors { gap: 22px; }.editor-heading { padding: 17px; }.editor-card textarea { min-height: 315px; padding: 18px; }.editor-chip { display: inline-block; }.connection-card { padding: 20px; }.connection-address { align-items: stretch; flex-direction: column; gap: 15px; }.connection-address .button { align-self: flex-start; }.setting-card { padding: 20px; }.settings-columns { gap: 20px; }.two-fields { gap: 0; }.upload-form { padding: 18px; }.upload-panel summary { padding: 17px; gap: 12px; }.upload-panel summary span:not(.expand-symbol) { font-size: 9px; }.upload-form .form-actions { align-items: flex-start; flex-direction: column; gap: 14px; }.button { font-size: 11px; }

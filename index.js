@@ -29,13 +29,14 @@ function narratorConfig(data = meta()) {
     const saved = data.narrator || {};
     return { voiceId: typeof saved.voiceId === 'string' ? saved.voiceId : '',
         mode: saved.mode === 'direction' ? 'direction' : 'clone',
+        fetchMode: ['off', 'playback', 'auto'].includes(saved.fetchMode) ? saved.fetchMode : 'playback',
         targetChars: normalizeNarrationTargetChars(saved.targetChars),
         emotion: typeof saved.emotion === 'string' && saved.emotion.trim() ? saved.emotion.trim().slice(0, 300) : DEFAULT_NARRATOR_EMOTION };
 }
 function itemVoice(item) {
     if (item.segment.kind !== 'narration') return mappedVoice(meta().mappings, item.segment.speaker, voices);
-    const { voiceId } = narratorConfig();
-    return voices.some(voice => voice.id === voiceId) ? voiceId : null;
+    const { voiceId, fetchMode } = narratorConfig();
+    return fetchMode !== 'off' && voices.some(voice => voice.id === voiceId) ? voiceId : null;
 }
 
 function meta(create = false) {
@@ -531,7 +532,7 @@ function renderMessages(onlyMessageId) {
             next.set(id, item); return item;
         });
         const narrator = narratorConfig();
-        const narration = voices.some(voice => voice.id === narrator.voiceId)
+        const narration = narrator.fetchMode !== 'off' && voices.some(voice => voice.id === narrator.voiceId)
             ? parseNarration(msg.mes, ctx.name1, { streaming: live, targetChars: narrator.targetChars }) : [];
         for (const segment of narration) {
             segment.emotion = narrator.emotion;
@@ -629,9 +630,11 @@ function renderNarrator() {
     const select = dialog?.querySelector('[data-narrator-voice]'); if (!select) return;
     const key = chatKey(context()), config = narratorConfig(), voice = voices.find(value => value.id === config.voiceId);
     const options = selectVoice(config.voiceId);
-    options.options[0].textContent = '不朗读旁白';
+    options.options[0].textContent = '未选择旁白音色';
     select.replaceChildren(...options.childNodes); select.value = config.voiceId;
     select.disabled = !key; select.dataset.chat = key;
+    const fetchMode = dialog.querySelector('[data-narrator-fetch-mode]');
+    fetchMode.value = config.fetchMode; fetchMode.disabled = !key; fetchMode.dataset.chat = key;
     const mode = dialog.querySelector('[data-narrator-mode]');
     mode.value = config.mode; mode.disabled = !key; mode.dataset.chat = key;
     const emotion = dialog.querySelector('[data-narrator-emotion]');
@@ -642,8 +645,14 @@ function renderNarrator() {
     targetChars.dataset.chat = key; targetChars.disabled = !key;
     dialog.querySelector('[data-narrator-preview]').disabled = !key || !voice;
     studioText('[data-narrator-status]', !key ? '打开一个聊天后，为旁白选择音色。'
-        : voice ? `已启用 · ${voice.name} · ${config.mode === 'clone' ? '声音克隆：沿用参考音频的语气和风格。' : '声音方向：使用下方情绪与表达。'}`
+        : config.fetchMode === 'off' ? `已关闭旁白获取与朗读${voice ? `，保留音色「${voice.name}」` : ''}。`
+        : voice ? `${config.fetchMode === 'auto' ? '自动获取' : '播放时获取'} · ${voice.name} · ${config.mode === 'clone' ? '声音克隆：沿用参考音频的语气和风格。' : '声音方向：使用下方情绪与表达。'}`
         : config.voiceId ? '原旁白音色已不可用，请重新选择；当前跳过旁白。' : '尚未选择音色，当前跳过旁白。');
+    studioText('[data-narrator-fetch-help]', config.fetchMode === 'off'
+        ? '全部播放、自动播放、重新获取和进度条均跳过旁白，只处理已绑定角色。已保存的旁白音色和设置保留。'
+        : config.fetchMode === 'auto'
+            ? '跟随「自动生成／自动播放」设置提前获取旁白；两项都关闭时不自动请求。播放时按正文顺序穿插角色对白。'
+            : '不随「自动生成」提前获取旁白；手动或自动播放全文时按正文顺序获取。主动重新获取或拖动进度时也会准备所需旁白。');
     studioText('[data-narrator-mode-help]', config.mode === 'clone'
         ? '沿用参考音频的音色、语气与风格；不附加情绪指令。已填写的情绪会保留，切回声音方向时使用。'
         : '在参考音色基础上，使用情绪与表达控制本条旁白的语气。');
@@ -690,6 +699,7 @@ function buildPanel() {
     const narratorVoice = dialog.querySelector('[data-narrator-voice]');
     const narratorEmotion = dialog.querySelector('[data-narrator-emotion]');
     const narratorMode = dialog.querySelector('[data-narrator-mode]');
+    const narratorFetchMode = dialog.querySelector('[data-narrator-fetch-mode]');
     const narratorTargetChars = dialog.querySelector('[data-narrator-target-chars]');
     const saveNarrator = event => {
         const key = chatKey(context());
@@ -699,6 +709,7 @@ function buildPanel() {
         invalidate();
         const data = meta(true);
         data.narrator = { voiceId: narratorVoice.value, mode: narratorMode.value === 'direction' ? 'direction' : 'clone',
+            fetchMode: ['off', 'auto'].includes(narratorFetchMode.value) ? narratorFetchMode.value : 'playback',
             targetChars: normalizeNarrationTargetChars(narratorTargetChars.value),
             emotion: narratorEmotion.value.trim() || DEFAULT_NARRATOR_EMOTION };
         narratorEmotion.value = data.narrator.emotion;
@@ -710,6 +721,7 @@ function buildPanel() {
     narratorVoice.addEventListener('change', saveNarrator);
     narratorEmotion.addEventListener('change', saveNarrator);
     narratorMode.addEventListener('change', saveNarrator);
+    narratorFetchMode.addEventListener('change', saveNarrator);
     narratorTargetChars.addEventListener('change', saveNarrator);
     dialog.querySelector('[data-narrator-preview]').addEventListener('click', event => {
         const voice = voices.find(value => value.id === narratorConfig().voiceId);
@@ -933,6 +945,8 @@ function automatic(ids) {
     for (const item of [...items.values()].sort((a, b) => a.messageId - b.messageId || a.segment.start - b.segment.start)) {
         if (!ids.has(item.messageId) || consumed.has(item.id)) continue;
         if (generationType === 'continue' && item.messageId === continueMessageId && item.segment.end <= continueCutoff) continue;
+        // On-demand narration joins actual playback, never generate-only background work.
+        if (item.segment.kind === 'narration' && narratorConfig().fetchMode !== 'auto' && !settings.autoPlay) continue;
         consumed.add(item.id);
         if (!itemVoice(item) || !valid(item)) continue;
         let queued = item;

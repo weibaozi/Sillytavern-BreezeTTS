@@ -19,9 +19,10 @@ async function openStudio(page, tab = 'characters') {
     await studio(page).locator(`[data-tab="${tab}"]`).click();
 }
 
-async function setNarrator(page, voiceId = narratorVoice, emotion) {
+async function setNarrator(page, voiceId = narratorVoice, emotion, fetchMode) {
     await openStudio(page);
     await field(page, 'narrator-voice').selectOption(voiceId);
+    if (fetchMode !== undefined) await field(page, 'narrator-fetch-mode').selectOption(fetchMode);
     if (emotion !== undefined) {
         await field(page, 'narrator-mode').selectOption('direction');
         await field(page, 'narrator-emotion').fill(emotion);
@@ -74,6 +75,7 @@ test('narrator selection and emotion belong to the chat, survive reload, and lea
     await openStudio(page);
     await expect(field(page, 'narrator-voice')).toHaveValue('');
     await expect(field(page, 'narrator-mode')).toHaveValue('clone');
+    await expect(field(page, 'narrator-fetch-mode')).toHaveValue('playback');
     await expect(field(page, 'narrator-emotion')).toHaveValue(defaultEmotion);
     await expect(field(page, 'narrator-target-chars')).toHaveValue('100');
     await expect(field(page, 'narrator-emotion')).toBeDisabled();
@@ -84,9 +86,10 @@ test('narrator selection and emotion belong to the chat, survive reload, and lea
 
     await field(page, 'narrator-voice').selectOption(narratorVoice);
     await field(page, 'narrator-mode').selectOption('direction');
+    await field(page, 'narrator-fetch-mode').selectOption('auto');
     await field(page, 'narrator-emotion').fill('温柔沉静，像在讲一个故事');
     await field(page, 'narrator-emotion').dispatchEvent('change');
-    await expect.poll(() => narrator(page)).toEqual({ voiceId: narratorVoice, mode: 'direction', targetChars: 100, emotion: '温柔沉静，像在讲一个故事' });
+    await expect.poll(() => narrator(page)).toEqual({ voiceId: narratorVoice, mode: 'direction', fetchMode: 'auto', targetChars: 100, emotion: '温柔沉静，像在讲一个故事' });
     expect(await injection(page)).toBe(prompt);
     expect(await page.evaluate(() => window.__breezeDemo.context.chatMetadata.breeze_voice.mappings)).toEqual(mappings);
     await expect(field(page, 'character-count')).toHaveText(characterCount);
@@ -98,28 +101,32 @@ test('narrator selection and emotion belong to the chat, survive reload, and lea
     await page.evaluate(() => window.__breezeDemo.switchChat('narrator-other-chat'));
     await expect(field(page, 'narrator-voice')).toHaveValue('');
     await expect(field(page, 'narrator-mode')).toHaveValue('clone');
+    await expect(field(page, 'narrator-fetch-mode')).toHaveValue('playback');
     await expect(field(page, 'narrator-emotion')).toHaveValue(defaultEmotion);
     await expect(field(page, 'narrator-target-chars')).toHaveValue('100');
     await field(page, 'narrator-voice').selectOption('1'.repeat(32));
     await field(page, 'narrator-mode').selectOption('direction');
+    await field(page, 'narrator-fetch-mode').selectOption('off');
     await field(page, 'narrator-emotion').fill('严肃，放慢语速');
     await field(page, 'narrator-emotion').dispatchEvent('change');
-    await expect.poll(() => narrator(page)).toEqual({ voiceId: '1'.repeat(32), mode: 'direction', targetChars: 100, emotion: '严肃，放慢语速' });
+    await expect.poll(() => narrator(page)).toEqual({ voiceId: '1'.repeat(32), mode: 'direction', fetchMode: 'off', targetChars: 100, emotion: '严肃，放慢语速' });
     await page.evaluate(() => window.__breezeDemo.switchChat('demo-campus-chat'));
     await expect(field(page, 'narrator-voice')).toHaveValue(narratorVoice);
     await expect(field(page, 'narrator-mode')).toHaveValue('direction');
+    await expect(field(page, 'narrator-fetch-mode')).toHaveValue('auto');
     await expect(field(page, 'narrator-emotion')).toHaveValue('温柔沉静，像在讲一个故事');
     await page.reload();
     await expect(page.locator('#chat .breeze-bubble').first()).toBeVisible();
     await openStudio(page);
     await expect(field(page, 'narrator-voice')).toHaveValue(narratorVoice);
     await expect(field(page, 'narrator-mode')).toHaveValue('direction');
+    await expect(field(page, 'narrator-fetch-mode')).toHaveValue('auto');
     await expect(field(page, 'narrator-emotion')).toHaveValue('温柔沉静，像在讲一个故事');
     expect(await injection(page)).toBe(prompt);
 });
 
 test('narration target is chat-bound and streaming counts across line breaks without making extra requests', async ({ page, request }) => {
-    await setNarrator(page);
+    await setNarrator(page, narratorVoice, undefined, 'auto');
     await openStudio(page);
     const prompt = await injection(page);
     await field(page, 'narrator-target-chars').fill('35');
@@ -214,7 +221,7 @@ test('switching narrator modes preserves emotion but generates separate narratio
     await field(page, 'narrator-mode').selectOption('clone');
     await expect(field(page, 'narrator-emotion')).toBeDisabled();
     await expect(field(page, 'narrator-emotion')).toHaveValue('温柔沉静，像在讲一个故事');
-    await expect.poll(() => narrator(page)).toEqual({ voiceId: narratorVoice, mode: 'clone', targetChars: 100, emotion: '温柔沉静，像在讲一个故事' });
+    await expect.poll(() => narrator(page)).toEqual({ voiceId: narratorVoice, mode: 'clone', fetchMode: 'playback', targetChars: 100, emotion: '温柔沉静，像在讲一个故事' });
     await field(page, 'close').click();
     await replaceMessage(page, '阳光照进教室。\n' + speech('周启明', '我来带路。', 'softly reassuring'));
     await playMessage(page).click();
@@ -251,6 +258,7 @@ test('older chats default to clone while retaining their saved narration emotion
     await expect(page.locator('#chat .breeze-bubble').first()).toHaveAttribute('data-state', 'idle');
     await openStudio(page);
     await expect(field(page, 'narrator-mode')).toHaveValue('clone');
+    await expect(field(page, 'narrator-fetch-mode')).toHaveValue('playback');
     await expect(field(page, 'narrator-emotion')).toHaveValue('保留这句旁白方向');
     await expect(field(page, 'narrator-emotion')).toBeDisabled();
     await field(page, 'close').click();
@@ -273,7 +281,7 @@ test('clone narration on an older backend requests an update instead of silently
 });
 
 test('live pregeneration waits for narration boundaries and complete tags, then flushes the final tail once', async ({ page, request }) => {
-    await setNarrator(page);
+    await setNarrator(page, narratorVoice, undefined, 'auto');
     await configure(page, { readStreamingText: true, autoGenerate: true });
     await begin(page);
     let raw = '门外传来';
@@ -333,7 +341,7 @@ test('automatic streamed audio starts with narration and retains narration-dialo
 
 for (const streamingText of [false, true]) {
     test(`continue with streaming text ${streamingText} reads only newly appended narration`, async ({ page, request }) => {
-        await setNarrator(page);
+        await setNarrator(page, narratorVoice, undefined, 'auto');
         await configure(page, { readStreamingText: streamingText, autoGenerate: true });
         const previous = '他走到窗前，';
         const continuation = '向操场望去。\n' + speech('周启明', '他们已经开始了。');
@@ -368,6 +376,7 @@ for (const streamingText of [false, true]) {
 test('the narrator card keeps its controls usable on desktop and narrow screens', async ({ page }) => {
     await openStudio(page);
     await expect(field(page, 'narrator-voice')).toBeVisible();
+    await expect(field(page, 'narrator-fetch-mode')).toBeVisible();
     await expect(field(page, 'narrator-emotion')).toBeVisible();
     await page.screenshot({ path: 'test-results/narrator-desktop.png' });
     await page.setViewportSize({ width: 375, height: 812 });
