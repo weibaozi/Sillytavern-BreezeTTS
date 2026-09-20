@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KEY, DEFAULTS } from '../extension/core.js';
-import { PROMPT_KEY, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, PROMPT_DEFAULTS, parseVocalEvents, buildVoicePrompt, syncVoicePrompt } from '../extension/prompt.js';
+import { KEY, DEFAULTS } from '../core.js';
+import { PROMPT_KEY, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, PROMPT_DEFAULTS, parseVocalEvents, buildVoicePrompt, syncVoicePrompt } from '../prompt.js';
 
 const voices = [{ id: 'voice-1', name: 'PRIVATE_LIBRARY_NAME_1' }, { id: 'voice-2', name: 'PRIVATE_LIBRARY_NAME_2' }];
 const expectedEvents = [

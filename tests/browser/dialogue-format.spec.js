@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { DEFAULTS } from '../../extension/core.js';
-import { DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, PROMPT_DEFAULTS } from '../../extension/prompt.js';
+import { DEFAULTS } from '../../core.js';
+import { DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, PROMPT_DEFAULTS } from '../../prompt.js';
 
 const storageKey = 'breeze-studio-demo-v1';
 const studio = page => page.locator('#breeze-studio-host').locator('dialog');

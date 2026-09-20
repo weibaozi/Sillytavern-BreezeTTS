@@ -1,4 +1,4 @@
 {
-  "folders": [{ "name": "Breeze · 单份对白实验分支", "path": "." }],
+  "folders": [{ "name": "Breeze · main", "path": "." }],
   "settings": { "search.exclude": { "node_modules/**": true, "references/**": true, "experiments/**": true } }
 }

@@ -4,9 +4,9 @@
 
 前版 0.7.0-tag-render.4：增加按聊天保存的旁白音色与情绪，默认「平稳口气，配音」。整条/自动播放及自动预生成按正文顺序处理旁白与对白；旁白不进入预设。流式等待完整片段，续写跳过旧旁白，停止或切换聊天取消队列。
 
-状态：`experiment/ttsvoice-render` 已实现单份 TTSVoice 渲染；前版已安装，本次新增读取流式文本与原生引号主题样式。稳定分支 `stable/v0.6.1` 与标签 `v0.6.1` 保留在 `60df1f8`。2026-09-19。
+状态：`main` 延续原 `experiment/ttsvoice-render`，已实现单份 TTSVoice 渲染；前版已安装，本次新增读取流式文本与原生引号主题样式。稳定分支 `stable/v0.6.1` 与标签 `v0.6.1` 保留在 `60df1f8`。2026-09-19。
 
-工作区：TTS 仍在 `G:\study\AI\breeze-tts`，稳定插件在其 `sillytavern-breeze` 下；实验插件在 `G:\study\AI\breeze-tts\sillytavern-breeze\branches\ttsvoice-render`。使用各目录自己的工作区文件；本实验不更改后端。安装步骤见 [README](README.md)。
+工作区：TTS 与本插件独立维护；维护者本地保留旧稳定版工作区，当前插件在 `main` 发布。仓库根目录符合酒馆 Git 安装布局，npm 仅用于开发测试。安装步骤见 [README](README.md)。
 
 ## 本次更新：流式文本与对白样式
 
@@ -226,7 +226,7 @@ data/tts/
 
 ## 6. 安装与连接
 
-扩展源码为原 TTS 目录下的 `sillytavern-breeze/extension/`，提供 ZIP 和安装脚本；npm 依赖仅用于开发测试，不需要复制到酒馆。
+扩展源码位于本仓库根目录，支持酒馆通过 Git URL 安装；也提供 ZIP 和安装脚本。npm 依赖仅用于开发测试，不需要复制到酒馆。
 
 用户本地安装酒馆后，将扩展复制到：
 
@@ -243,7 +243,7 @@ SillyTavern/data/default-user/extensions/sillytavern-breeze/
 - 后端默认允许 localhost／127.0.0.1 的酒馆页面跨域访问；其他来源通过 `BREEZE_TTS_ORIGINS` 显式配置。
 - HTTPS 酒馆连接 HTTP TTS 可能被浏览器拦截；联调时按实际部署方式配置同协议或反向代理。
 
-本地酒馆已确认在 `G:\study\AI\SillyTavern-Launcher\SillyTavern`，访问地址 `http://127.0.0.1:8002/`。0.2.0 的工作室入口已验证，完整语音联调仍待完成。
+维护者的本地测试酒馆访问地址 `http://127.0.0.1:8002/`。0.2.0 的工作室入口已验证，完整语音联调仍待完成。
 
 ## 7. 分阶段实施与验收
 

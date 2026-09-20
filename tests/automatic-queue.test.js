@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AutomaticSpeechQueue } from '../extension/automatic-queue.js';
-import { SpeechPlayer } from '../extension/player.js';
+import { AutomaticSpeechQueue } from '../automatic-queue.js';
+import { SpeechPlayer } from '../player.js';
 
 function deferred() {
     let resolve, reject;

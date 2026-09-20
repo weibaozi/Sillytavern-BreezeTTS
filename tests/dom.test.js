@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { PROMPT_KEY, DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS } from '../extension/prompt.js';
+import { PROMPT_KEY, DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS } from '../prompt.js';
 
 test('actual extension binds current-chat voices, creates safe bubbles, hides only display tags and restores originals', async () => {
     const dom = new JSDOM('<div id="extensions_settings"></div><button id="extensionsMenuButton">魔棒</button><div id="extensionsMenu"></div><div id="chat"><div class="mes" mesid="0"><div class="mes_text"></div></div></div><form id="send_form"></form>', { url: 'http://127.0.0.1:8002/' });
@@ -44,7 +44,7 @@ test('actual extension binds current-chat voices, creates safe bubbles, hides on
         return { ok: true, json: async () => data };
     };
     const tick = () => new Promise(r => setTimeout(r, 180));
-    await import('../extension/index.js'); await tick();
+    await import('../index.js'); await tick();
     const panel = document.querySelector('#breeze-studio-host').shadowRoot;
     assert.equal(ctx.extensionSettings.breeze_voice.promptTemplate, LEGACY_DEFAULT_TEMPLATE, 'stable template remains unchanged for rollback');
     assert.equal(ctx.extensionSettings.breeze_voice.tagRenderPromptTemplate, DEFAULT_TEMPLATE, 'experiment uses its own single-copy template');

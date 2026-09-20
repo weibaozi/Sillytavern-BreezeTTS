@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PROMPT_DEFAULTS } from '../extension/prompt.js';
+import { PROMPT_DEFAULTS } from '../prompt.js';
 import { listExtraPresets, resolveExtraPrompt, createExtraPreset, updateExtraPreset,
-    deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from '../extension/extra-prompts.js';
+    deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from '../extra-prompts.js';
 
 const settings = () => ({ ...PROMPT_DEFAULTS });
 

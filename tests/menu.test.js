@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { mountStudioEntry } from '../extension/menu.js';
+import { mountStudioEntry } from '../menu.js';
 
 test('wand entry waits for host menu, supports keyboard and does not duplicate', async () => {
     const dom = new JSDOM('<body><form id="send_form"></form></body>');

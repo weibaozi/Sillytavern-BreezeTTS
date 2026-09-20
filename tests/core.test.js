@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTTS, parseStreamingTTS, discoverSpeakers, chatKey, mappedVoice, cacheKey, requestFor, normalizeBase, DEFAULTS } from '../extension/core.js';
+import { parseTTS, parseStreamingTTS, discoverSpeakers, chatKey, mappedVoice, cacheKey, requestFor, normalizeBase, DEFAULTS } from '../core.js';
 
 test('nested vocal tags, colons and repeated passages remain intact', () => {
     const raw = '“走吧。”\n[TTSVoice:周启明:开心:[笑]走吧。时间是：12:30。[叹气]]\n[TTSVoice：周启明：：走吧。]';

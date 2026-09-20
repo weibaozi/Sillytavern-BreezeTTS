@@ -5,6 +5,7 @@
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "author": "Local development",
-  "version": "0.7.0-tag-render.9"
+  "author": "weibaozi",
+  "version": "0.7.0-tag-render.9",
+  "homePage": "https://github.com/weibaozi/Sillytavern-BreezeTTS"
 }

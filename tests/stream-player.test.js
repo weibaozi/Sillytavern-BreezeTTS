@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PCMStreamPlayer, decodePCM } from '../extension/stream-player.js';
+import { PCMStreamPlayer, decodePCM } from '../stream-player.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 export class FakeContext {

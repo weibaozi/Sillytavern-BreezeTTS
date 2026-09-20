@@ -1,0 +1,17 @@
+[
+  "automatic-queue.js",
+  "client.js",
+  "core.js",
+  "dialogue-render.js",
+  "extra-prompts.js",
+  "index.js",
+  "manifest.json",
+  "menu.js",
+  "narration.js",
+  "panel.css",
+  "panel.js",
+  "player.js",
+  "prompt.js",
+  "stream-player.js",
+  "style.css"
+]

@@ -1,11 +1,11 @@
 // Local, self-contained UI preview. All audio and API responses are synthetic demo data.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { dirname, extname, resolve, relative, isAbsolute } from 'node:path';
+import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const extensionRoot = resolve(project, 'extension');
+const runtimeFiles = new Set(JSON.parse(await readFile(new URL('./runtime-files.json', import.meta.url), 'utf8')));
 const port = Number(process.env.BREEZE_PREVIEW_PORT || 8019);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid BREEZE_PREVIEW_PORT');
 const ids = ['1'.repeat(32), '2'.repeat(32), '3'.repeat(32)];
@@ -36,7 +36,7 @@ const demoAudio = wav();
 
 const html = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Breeze Studio · 交互预览</title>
-<link rel="stylesheet" href="/extension/style.css">
+<link rel="stylesheet" href="/style.css">
 <style>
 :root{--SmartThemeQuoteColor:rgb(225,138,36)}.mes_text q{color:var(--SmartThemeQuoteColor)}.mes q::before,.mes q::after{content:''}
 *{box-sizing:border-box}body{margin:0;background:#eeeae4;color:#363b37;font-family:system-ui,"Microsoft YaHei",sans-serif}button{font:inherit;cursor:pointer}.demo-shell{max-width:950px;margin:auto;padding:30px 24px}.demo-label{font-size:11px;letter-spacing:.15em;color:#6b756e;text-transform:uppercase}.demo-title{font-size:24px;margin:12px 0 6px}.demo-note{color:#747b72;font-size:13px;line-height:1.8}.demo-chat{padding:26px;border:1px solid #d7d9d0;border-radius:18px;background:#f8f8f3;margin-top:24px;line-height:1.8}.demo-chat h2{font-size:15px;color:#73796f}#send_form{display:flex;align-items:center;gap:12px;position:relative;margin-top:22px;border:1px solid #d4d8ce;background:#fffdf8;padding:12px;border-radius:14px}#send_form textarea{resize:none;flex:1;border:0;background:transparent;color:#72796e;font:inherit;min-width:0}#extensionsMenuButton{width:44px;height:44px;background:#e2eada;border:0;border-radius:10px;color:#466343;font-size:24px}#extensionsMenu{position:absolute;left:0;bottom:76px;width:248px;padding:8px;border:1px solid #d6dbd0;border-radius:12px;background:#fafbf5;box-shadow:0 14px 50px #17331b22;z-index:100}#extensionsMenu [hidden]{display:none}#extensionsMenu button,.list-group-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px;border:0;background:transparent;color:#555e52;text-align:left;font-size:14px;border-radius:7px}#extensionsMenu button:hover,.list-group-item:hover{background:#e7eddc}.demo-tag{font-size:11px;border:1px solid #cfdbc6;padding:2px 7px;border-radius:5px}.mes_text{white-space:pre-wrap}.demo-footer{margin-top:20px;font-size:12px;color:#7b8276}@media(max-width:500px){.demo-shell{padding:22px 14px}.demo-chat{padding:20px}}
@@ -132,7 +132,7 @@ window.__breezeDemo = {
 const menu = document.querySelector('#extensionsMenu'), toggle = document.querySelector('#extensionsMenuButton');
 toggle.onclick = () => {menu.hidden=!menu.hidden;toggle.setAttribute('aria-expanded',String(!menu.hidden))};
 menu.addEventListener('click',event=>{if(event.target.closest('#breeze_studio_wand_entry')){menu.hidden=true;toggle.setAttribute('aria-expanded','false')}});
-</script><script type="module" src="/extension/index.js"></script></body></html>`;
+</script><script type="module" src="/index.js"></script></body></html>`;
 
 function json(res, data, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); }
 async function body(req) {
@@ -218,10 +218,8 @@ const server = createServer(async (req, res) => {
             state.audioRequests.push({ path, at: Date.now() });
             res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': demoAudio.length, 'Cache-Control': 'no-store' }); return res.end(demoAudio);
         }
-        if (path.startsWith('/extension/') && req.method === 'GET') {
-            const filename = resolve(extensionRoot, decodeURIComponent(path.slice('/extension/'.length)));
-            const child = relative(extensionRoot, filename);
-            if (!child || child.startsWith('..') || isAbsolute(child) || !['.js', '.css', '.json'].includes(extname(filename))) return json(res, { detail: 'Invalid preview asset' }, 403);
+        if (runtimeFiles.has(decodeURIComponent(path.slice(1))) && req.method === 'GET') {
+            const filename = resolve(project, decodeURIComponent(path.slice(1)));
             const content = await readFile(filename);
             res.writeHead(200, { 'Content-Type': ({ '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' })[extname(filename)] + '; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(content);
         }

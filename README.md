@@ -1,32 +1,22 @@
-# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.9（实验分支）
+# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.9
 
 模型只写一份 `[TTSVoice:角色名:情绪:对白]`，插件在显示层把它呈现为普通引号对白和播放气泡。原始聊天 `mes` 保持不变，已绑定角色连接原 Breeze WebUI 合成及播放；未绑定角色仍显示对白，仅跳过语音。原有独立工作室、音色库、流式播放、语气词设置和共享语料库保留。
 
-当前开发分支为 `experiment/ttsvoice-render`。稳定分支 `stable/v0.6.1` 与标签 `v0.6.1` 保留在基线提交 `60df1f8`。本地酒馆已试用前一版单份对白插件，本次更新后刷新页面生效。实现范围、历史兼容边界及回退方法见 [单份对白方案](docs/单份对白方案.md)。
+当前发布分支为 `main`，由原 `experiment/ttsvoice-render` 分支延续，保留完整开发历史。旧稳定版 `stable/v0.6.1` 与标签 `v0.6.1` 保留在本地。实现范围、历史兼容边界及回退方法见 [单份对白方案](docs/单份对白方案.md)。
 
-## 两个工作区
+## 从 Git 安装
 
-- **TTS**：仍在 `G:\study\AI\breeze-tts`，打开该目录的 `TTS.code-workspace`。后端代码位于该目录下的 `breeze_infer/voice_service.py`，接入原 `webui.py` 和 `breeze_infer/api.py`，共用已加载模型及推理锁。0.7.0-tag-render.5 同时增加后端纯克隆支持，应用后需重启后端。
-- **稳定插件**：`G:\study\AI\breeze-tts\sillytavern-breeze`，保留 0.6.1。
-- **实验插件**：本目录 `G:\study\AI\breeze-tts\sillytavern-breeze\branches\ttsvoice-render`，打开这里的 `酒馆插件.code-workspace`。`extension/` 是可安装扩展，无运行时 npm 依赖。原有酒馆预设、世界书、参考和实验文件保留；迁移清单为 `relocated-files.json`。
-- 音色和合成文件保存在原 TTS 的 `data/tts/`，不放入插件。映射和音频缓存引用存于酒馆当前聊天的 metadata。
-
-## 实验安装与首次使用
-
-按以下步骤安装或更新同名扩展，**不要把稳定版和实验版作为两个扩展同时安装或启用**；两者使用同一个提示词 key、设置命名空间和聊天事件。
-
-1. 使用已有配套 Breeze WebUI 并加载模型；从 0.6.1 试用本实验无需更改或重启后端。首次部署仍需支持 `/breeze/*` 的配套后端。
-2. 在本实验目录执行安装脚本；需要显式添加 `-InstallExperimental`。脚本先备份当前同名扩展，再替换到：
+1. 打开酒馆 **扩展程序 → 安装扩展**，粘贴仓库地址：
 
    ```text
-   G:\study\AI\SillyTavern-Launcher\SillyTavern\data\default-user\extensions\sillytavern-breeze\
+   https://github.com/weibaozi/Sillytavern-BreezeTTS
    ```
 
-   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.9.zip`。
+   保持默认分支（`main`），安装完成后刷新页面。之后可在酒馆扩展管理中检查并更新。本仓库根目录直接包含 `manifest.json` 和运行文件，无需 npm、编译或额外复制目录。
 
-   ```powershell
-   .\install.ps1 -SillyTavernPath 'G:\study\AI\SillyTavern-Launcher\SillyTavern' -InstallExperimental
-   ```
+2. 启动配套 **Breeze TTS 后端**并加载模型。本仓库仅包含酒馆插件，不包含模型、音色或后端；后端需要支持本插件的 `/breeze/*` 接口，旁白克隆和流式播放也需要相应的后端支持。
+
+   **从之前手动安装的版本迁移**：先禁用旧的 `sillytavern-breeze` 扩展，再从 Git 安装。Git 安装目录名为 `Sillytavern-BreezeTTS`，不要让新旧两个目录中的插件同时启用；两者共享设置与聊天音色映射。迁移不需要删除聊天或音色。
 
 3. 刷新酒馆页面，点击输入栏左下方的 **魔棒 → Breeze 语音工作室**。在「连接与播放」填写地址，默认为 `http://127.0.0.1:7860`，点击「保存并连接」。
 4. 在「本地音色库」展开「导入参考音色」直接保存已有音频和准确文字。需要创造新声音时，在「声音设计室」选择「文字设计」或「语音方向」：前者填写描述，后者上传参考音频与准确文字（可试听上传的参考，声音描述可留空），再填写试听文本和候选数量，生成、试听后命名保存。
@@ -36,6 +26,20 @@
 7. 「预设注入」默认开启。插件在每轮生成前通过酒馆 `setExtensionPrompt` 注入英文 TTSVoice 规范，自动填入当前聊天角色、已绑定／未绑定名单与当前语气词列表。默认 47 个中英文语气词，可直接在面板编辑；额外语料可命名保存，再由各聊天选择和启用。无需再手动复制整段输出规范。
 
 试用时关闭手工重复添加的 **TTS 输出规范条目**。若使用本项目旧的 TGbreak 兼容片段，应将其中“正文对白后再追加副本”改为新片段 [TGbreak 单份对白实验版](prompts/TGbreak_原思维-格式_单份对白实验版.txt)；仅调整 TTS 要求，保留原剧情、格式、咪咪吐槽等约束。插件不会自动修改已保存的预设文件、提示词顺序或历史消息。
+
+### 手动安装与开发目录
+
+也可以执行 `python tools/package.py` 生成 `dist/sillytavern-breeze-0.7.0-tag-render.9.zip`，解压到酒馆用户的 `extensions/` 下；或在 Windows 从源码目录运行：
+
+```powershell
+.\install.ps1 -SillyTavernPath 'C:\path\to\SillyTavern' -InstallExperimental
+```
+
+脚本先备份旧的 `sillytavern-breeze` 再复制运行文件。手动安装不具备 Git 更新记录，使用此方式时不要同时启用 Git 安装版。
+
+- **插件**：本仓库；运行文件在根目录，测试在 `tests/`，开发工具在 `tools/`。`酒馆插件.code-workspace` 可直接打开当前目录。
+- **TTS**：单独维护和运行。音色与音频保存在后端的 `data/tts/`，不随 Git 插件安装复制；聊天映射和音频缓存引用存于酒馆的聊天 metadata。
+- 默认后端地址为 `http://127.0.0.1:7860`。从另一台电脑访问时填写后端电脑的局域网地址，并确保后端允许对应酒馆页面的来源；`127.0.0.1` 指浏览器所在的电脑。
 
 ### 单份对白显示
 
@@ -151,10 +155,11 @@ npm ci
 npm test
 npm run check
 npm run test:browser
+python -m unittest discover -s tests -p "test_*.py"
 python tools/package.py
 
 # 后端检查需切换到原 TTS 目录，本实验没有修改后端
-Set-Location 'G:\study\AI\breeze-tts'
+Set-Location 'C:\path\to\breeze-tts'
 .\installer_files\env\python.exe -m pytest tests -q
 ```
 

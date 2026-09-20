@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTTS } from '../extension/core.js';
-import { displayDialogue, hasLegacyDialogue } from '../extension/dialogue-render.js';
+import { parseTTS } from '../core.js';
+import { displayDialogue, hasLegacyDialogue } from '../dialogue-render.js';
 
 function legacy(raw, ordinal = 0, events = '') {
     const segments = parseTTS(raw).segments;

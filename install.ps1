@@ -1,6 +1,8 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$SillyTavernPath = 'G:\study\AI\SillyTavern-Launcher\SillyTavern',
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$SillyTavernPath,
     [string]$UserHandle = 'default-user',
     [switch]$InstallExperimental
 )
@@ -21,7 +23,24 @@ $destination = [IO.Path]::GetFullPath((Join-Path $userRoot 'extensions\sillytave
 if (-not $destination.StartsWith($stRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Extension destination is outside the selected installation.'
 }
-$source = Join-Path $PSScriptRoot 'extension'
+$sourceRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+if ($sourceRoot.Equals($destination, [StringComparison]::OrdinalIgnoreCase) -or
+    $sourceRoot.StartsWith($destination.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Run the manual installer from a separate checkout outside the installed extension directory. Use Git update for an existing Git installation.'
+}
+$runtimeFiles = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'tools\runtime-files.json') -Raw | ConvertFrom-Json
+$runtimeFiles = @($runtimeFiles)
+if ($runtimeFiles.Count -eq 0 -or @($runtimeFiles | Select-Object -Unique).Count -ne $runtimeFiles.Count) {
+    throw 'Runtime file list must be nonempty and contain no duplicates.'
+}
+foreach ($runtimeFile in $runtimeFiles) {
+    if ($runtimeFile -isnot [string] -or $runtimeFile -notmatch '^[a-z0-9-]+\.(js|css|json)$') {
+        throw "Invalid runtime filename: $runtimeFile"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $runtimeFile) -PathType Leaf)) {
+        throw "Missing runtime file: $runtimeFile"
+    }
+}
 if ($PSCmdlet.ShouldProcess($destination, 'Back up existing extension and install Breeze plugin files')) {
     if (Test-Path -LiteralPath $destination) {
         $backup = Join-Path $PSScriptRoot ('backups\' + [DateTime]::Now.ToString('yyyyMMdd-HHmmss-fff'))
@@ -30,8 +49,8 @@ if ($PSCmdlet.ShouldProcess($destination, 'Back up existing extension and instal
         Write-Output "Backup: $backup"
     }
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
-    Get-ChildItem -LiteralPath $source -File | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+    foreach ($runtimeFile in $runtimeFiles) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $runtimeFile) -Destination $destination -Force
     }
     Write-Output "Installed: $destination"
     Write-Output 'Reload SillyTavern. Narrator clone mode requires the updated Breeze backend; restart it after applying the backend changes.'

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { DEFAULT_VOCAL_EVENTS, PREVIOUS_DEFAULT_VOCAL_EVENTS } from '../../extension/prompt.js';
+import { DEFAULT_VOCAL_EVENTS, PREVIOUS_DEFAULT_VOCAL_EVENTS } from '../../prompt.js';
 
 const defaults = DEFAULT_VOCAL_EVENTS;
 const previousDefaults = '[笑]\n[叹气]\n[咳嗽]\n[清嗓子]';

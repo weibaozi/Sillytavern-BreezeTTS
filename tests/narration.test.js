@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseNarration, DEFAULT_NARRATION_TARGET_CHARS, normalizeNarrationTargetChars } from '../extension/narration.js';
-import { parseTTS } from '../extension/core.js';
+import { parseNarration, DEFAULT_NARRATION_TARGET_CHARS, normalizeNarrationTargetChars } from '../narration.js';
+import { parseTTS } from '../core.js';
 
 const texts = (raw, streaming = false) => parseNarration(raw, '包子', { streaming }).map(s => s.text);
 

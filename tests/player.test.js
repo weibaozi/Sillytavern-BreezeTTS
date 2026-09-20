@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SpeechPlayer } from '../extension/player.js';
-import { BreezeClient } from '../extension/client.js';
+import { SpeechPlayer } from '../player.js';
+import { BreezeClient } from '../client.js';
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const item = id => ({ id });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BreezeClient } from '../extension/client.js';
+import { BreezeClient } from '../client.js';
 
 const id = 'd'.repeat(32);
 const queued = { id, status: 'queued', stream_url: `/breeze/jobs/${id}/stream` };
