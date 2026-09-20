@@ -10,7 +10,7 @@ const setText = (node, value) => {
 };
 
 /** An isolated view; the caller owns message selection, playback and saved preferences. */
-export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onSelect, onCollapse, onSeek, collapsed = false } = {}) {
+export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onSelect, onCollapse, onSeek, onToggleEnabled, collapsed = false } = {}) {
     const existing = instances.get(document);
     if (existing) {
         if (!existing.host.isConnected) document.body.append(existing.host);
@@ -31,7 +31,10 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
       <section id="breeze-floating-panel" class="breeze-floating-panel" aria-label="Breeze 浮动语音控制">
         <header class="breeze-floating-header">
           <div class="breeze-floating-brand"><span class="breeze-floating-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><div><strong>Breeze</strong><span class="breeze-floating-caption">语音播放</span></div></div>
-          <button class="breeze-floating-toggle" type="button" data-collapse aria-label="收起语音面板" aria-expanded="true" aria-controls="breeze-floating-panel" title="收起语音面板"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
+          <div class="breeze-floating-header-actions">
+            <button class="breeze-floating-master" type="button" data-master-toggle role="switch" aria-label="Breeze 总开关" aria-checked="true" title="关闭 Breeze"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v7m-4-5a7 7 0 1 0 8 0"/></svg><span data-master-label>开</span></button>
+            <button class="breeze-floating-toggle" type="button" data-collapse aria-label="收起语音面板" aria-expanded="true" aria-controls="breeze-floating-panel" title="收起语音面板"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
+          </div>
         </header>
         <div class="breeze-floating-content">
           <label class="breeze-floating-select-label" for="breeze-floating-message">朗读的回复</label>
@@ -51,11 +54,16 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
           </div>
         </div>
       </section>
-      <button class="breeze-floating-compact" type="button" data-expand aria-label="展开语音面板" aria-expanded="false" aria-controls="breeze-floating-panel" title="展开语音面板" hidden><span class="breeze-floating-dot" aria-hidden="true"></span><strong>Breeze</strong><span data-compact-status>待播放</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 12 5-5 5 5"/></svg></button>`;
+      <div class="breeze-floating-compact-group" hidden>
+        <button class="breeze-floating-compact" type="button" data-expand aria-label="展开语音面板" aria-expanded="false" aria-controls="breeze-floating-panel" title="展开语音面板" hidden><span class="breeze-floating-dot" aria-hidden="true"></span><strong>Breeze</strong><span data-compact-status>待播放</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 12 5-5 5 5"/></svg></button>
+        <button class="breeze-floating-master breeze-floating-master-compact" type="button" data-master-toggle role="switch" aria-label="Breeze 总开关" aria-checked="true" title="关闭 Breeze"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v7m-4-5a7 7 0 1 0 8 0"/></svg><span data-master-label>开</span></button>
+      </div>`;
     root.append(stylesheet, shell);
     const panel = root.querySelector('.breeze-floating-panel');
     const collapseButton = root.querySelector('[data-collapse]');
     const expandButton = root.querySelector('[data-expand]');
+    const compactGroup = root.querySelector('.breeze-floating-compact-group');
+    const masterToggles = [...root.querySelectorAll('[data-master-toggle]')];
     const select = root.querySelector('select');
     const controls = root.querySelector('.breeze-message-controls');
     const play = root.querySelector('.breeze-message-play');
@@ -77,7 +85,7 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
     let seeking = false;
     let seekGesture = null;
     let current = {
-        visible: false, messages: [], selectedMessageId: null, messageId: null,
+        visible: false, enabled: true, messages: [], selectedMessageId: null, messageId: null,
         label: '', status: '', paused: false, active: false, refreshing: false,
         refreshLabel: '', feedback: '', canPlay: false, canRefresh: false,
         canPause: false, canStop: false, selectionLocked: false,
@@ -89,6 +97,7 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
     };
     const renderCollapsed = () => {
         panel.hidden = isCollapsed;
+        compactGroup.hidden = !isCollapsed;
         expandButton.hidden = !isCollapsed;
         host.dataset.collapsed = String(isCollapsed);
     };
@@ -100,6 +109,7 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
     };
     listen(collapseButton, 'click', () => changeCollapsed(true));
     listen(expandButton, 'click', () => changeCollapsed(false));
+    for (const toggle of masterToggles) listen(toggle, 'click', () => onToggleEnabled?.(!current.enabled));
     listen(select, 'change', () => {
         if (select.disabled) return;
         current.selectedMessageId = select.value === '' ? null : Number(select.value);
@@ -154,6 +164,12 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
             const previousMessageId = current.messageId;
             current = { ...current, ...state };
             host.hidden = !current.visible;
+            const enabled = Boolean(current.enabled);
+            for (const toggle of masterToggles) {
+                toggle.setAttribute('aria-checked', String(enabled));
+                toggle.title = enabled ? '关闭 Breeze' : '开启 Breeze';
+                setText(toggle.querySelector('[data-master-label]'), enabled ? '开' : '关');
+            }
             const choices = current.messages.filter(message => isMessageId(message.id));
             const nextOptionKey = JSON.stringify(choices.map(message => [message.id, String(message.label ?? '')]));
             if (optionKey !== nextOptionKey) {
@@ -169,10 +185,10 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
             }
             const selectedValue = isMessageId(current.selectedMessageId) ? String(current.selectedMessageId) : '';
             if (select.value !== selectedValue) select.value = selectedValue;
-            select.disabled = Boolean(current.selectionLocked);
+            select.disabled = !enabled || Boolean(current.selectionLocked);
             const hasTarget = isMessageId(current.messageId);
             const timeline = current.timeline || {};
-            seek.disabled = !hasTarget || !timeline.enabled;
+            seek.disabled = !enabled || !hasTarget || !timeline.enabled;
             if (seek.disabled || previousMessageId !== current.messageId || !current.visible) {
                 seeking = false;
                 // Preserve a cancelled gesture until its commit; later input belongs to that same drag.
@@ -182,19 +198,19 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
             setText(seekHint, timeline.hint);
             if (!seeking) renderSeek();
             controls.dataset.messageId = hasTarget ? String(current.messageId) : '';
-            const playbackState = current.refreshing ? 'refreshing' : current.paused ? 'paused' : current.active ? 'playing' : 'idle';
+            const playbackState = !enabled ? 'disabled' : current.refreshing ? 'refreshing' : current.paused ? 'paused' : current.active ? 'playing' : 'idle';
             controls.dataset.state = playbackState;
             host.dataset.state = playbackState;
-            play.disabled = !hasTarget || !current.canPlay;
-            pause.disabled = !hasTarget || !current.canPause;
-            stop.disabled = !hasTarget || !current.canStop;
-            refresh.disabled = !hasTarget || !current.canRefresh;
+            play.disabled = !enabled || !hasTarget || !current.canPlay;
+            pause.disabled = !enabled || !hasTarget || !current.canPause;
+            stop.disabled = !enabled || !hasTarget || !current.canStop;
+            refresh.disabled = !enabled || !hasTarget || !current.canRefresh;
             pause.setAttribute('aria-pressed', String(Boolean(current.paused)));
             setText(pause, current.paused ? '▶ 继续' : '⏸ 暂停');
             pause.title = current.paused ? '从暂停处继续播放' : '暂停本条语音队列';
             refresh.setAttribute('aria-busy', String(Boolean(current.refreshing)));
             setText(refresh, current.refreshLabel || (current.refreshing ? '↻ 重新获取中' : '↻ 重新获取'));
-            const statusText = current.status || (current.refreshing ? '重新获取中' : current.paused ? '已暂停' : current.active ? '播放中' : hasTarget ? '待播放' : '暂无可朗读回复');
+            const statusText = !enabled ? '已关闭' : current.status || (current.refreshing ? '重新获取中' : current.paused ? '已暂停' : current.active ? '播放中' : hasTarget ? '待播放' : '暂无可朗读回复');
             setText(status, statusText);
             setText(compactStatus, statusText);
             compactStatus.title = String(statusText);

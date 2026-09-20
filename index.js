@@ -72,7 +72,7 @@ function refreshStudioSummary() {
     studioText('[data-bound-count]', String(bound.length));
     studioText('[data-voice-count]', String(voices.length));
     studioText('[data-volume-value]', `${Math.round(Number(settings.volume) * 100)}%`);
-    studioText('[data-playback-label]', settings.autoPlay ? '自动播放已开启' : settings.autoGenerate ? '自动生成 · 手动播放' : '点击气泡播放');
+    studioText('[data-playback-label]', !settings.enabled ? 'Breeze 已关闭' : settings.autoPlay ? '自动播放已开启' : settings.autoGenerate ? '自动生成 · 手动播放' : '点击气泡播放');
     studioText('[data-service-label]', { offline: '未连接', connecting: '正在连接', ready: '模型已就绪', unloaded: '模型未加载' }[serviceState]);
     dialog.querySelectorAll('[data-service-dot]').forEach(node => { node.dataset.state = serviceState; });
 }
@@ -295,20 +295,21 @@ function refreshPlaybackControls() {
         : `已重新获取 ${task.completed} 段语音。`;
     const label = messageId == null ? '尚无可朗读的回复' : `第 ${messageId + 1} 条消息 · ${ctx.chat[messageId]?.name || ctx.name2 || '回复'}`;
     floatingControls.update({
-        visible: Boolean(settings.enabled && key && ids.length),
+        visible: Boolean(key), enabled: Boolean(settings.enabled),
         messages: ids.map(id => ({ id, label: `第 ${id + 1} 条 · ${String(grouped.get(id)[0]?.segment.text || '正在生成…').slice(0, 32)}` })),
         selectedMessageId: selectedPlaybackMessage, messageId, label,
-        status: refreshing ? task.kind === 'seek' ? '准备完整音频' : '重新获取中'
-            : ownsPlayback ? player.paused ? '已暂停' : '播放中' : live ? '文字生成中' : entries.length ? '待播放' : '待绑定音色',
+        status: !settings.enabled ? '已关闭' : refreshing ? task.kind === 'seek' ? '准备完整音频' : '重新获取中'
+            : ownsPlayback ? player.paused ? '已暂停' : '播放中' : live ? '文字生成中'
+                : messageId == null ? '暂无可朗读回复' : entries.length ? '待播放' : '待绑定音色',
         paused: ownsPlayback && player.paused, active: ownsPlayback, refreshing,
         refreshLabel: refreshing ? `${task.kind === 'seek' ? '准备音频' : '↻ 重新获取中'} ${task.completed}/${task.items.length}` : '↻ 重新获取',
-        feedback, canPlay: messageId != null, canPause: ownsPlayback && player.active,
-        canStop: ownsPlayback || refreshing, canRefresh: messageId != null && !live && !refreshing,
+        feedback, canPlay: settings.enabled && messageId != null, canPause: settings.enabled && ownsPlayback && player.active,
+        canStop: settings.enabled && (ownsPlayback || refreshing), canRefresh: settings.enabled && messageId != null && !live && !refreshing,
         selectionLocked: ownsPlayback || refreshing,
-        timeline: { enabled: Boolean(entries.length && !live && !refreshing), percent,
+        timeline: { enabled: Boolean(settings.enabled && entries.length && !live && !refreshing), percent,
             currentLabel: formatPlaybackTime(elapsed), totalLabel: timeline.ready ? formatPlaybackTime(timeline.total) : '待准备',
-            hint: live ? '文字生成完成后可拖动进度' : refreshing ? '正在准备音频…'
-                : !entries.length ? '先为角色或旁白绑定音色' : timeline.ready ? '拖动可定位到整条回复的任意位置'
+            hint: !settings.enabled ? '总开关已关闭，预设不会注入' : live ? '文字生成完成后可拖动进度' : refreshing ? '正在准备音频…'
+                : messageId == null ? '有可朗读的回复后，可在这里播放' : !entries.length ? '先为角色或旁白绑定音色' : timeline.ready ? '拖动可定位到整条回复的任意位置'
                     : '拖动后先准备完整音频，再从所选位置播放' },
     });
     if (player.active && progressTimer == null) progressTimer = window.setInterval(refreshPlaybackControls, 200);
@@ -413,6 +414,15 @@ function invalidate() {
     stopPlayback(); stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
     epoch++; autoPending.clear(); allowAutomatic = false;
     clearTimeout(automaticTimer); automaticTimer = null; designController?.abort(); scheduleRender();
+}
+function setEnabled(value) {
+    settings.enabled = Boolean(value);
+    const input = dialog?.querySelector('[data-setting="enabled"]');
+    if (input) input.checked = settings.enabled;
+    refreshPrompt();
+    invalidate(); saveSettings();
+    clearTimeout(renderTimer); renderTimer = null; render();
+    refreshStudioSummary();
 }
 async function play(item) {
     if (!settings.enabled) return;
@@ -746,8 +756,9 @@ function buildPanel() {
         if (key === 'baseUrl') continue;
         input.addEventListener('change', () => {
             if (!input.checkValidity()) { input.reportValidity(); input.value = settings[key]; return; }
+            if (key === 'enabled') { setEnabled(input.checked); return; }
             settings[key] = input.type === 'checkbox' ? input.checked : Number(input.value);
-            if (['enabled', 'cfgScale', 'seed', 'autoPlay', 'autoGenerate', 'streaming', 'readStreamingText'].includes(key)) invalidate();
+            if (['cfgScale', 'seed', 'autoPlay', 'autoGenerate', 'streaming', 'readStreamingText'].includes(key)) invalidate();
             player.volume = settings.volume; if (player.audio) player.audio.volume = settings.volume;
             if (key === 'volume') {
                 if (previewAudio) previewAudio.volume = Number(settings.volume);
@@ -1018,6 +1029,7 @@ function init() {
     buildPanel();
     floatingControls = createFloatingControls({
         collapsed: settings.floatingControlsCollapsed === true,
+        onToggleEnabled: setEnabled,
         onPlay: playMessage,
         onPause: messageId => { void player.togglePause().catch(error => playbackError(error, messageId)); },
         onStop: () => { allowAutomatic = false; autoPending.clear(); playbackFeedback = null; stopPlayback(); },

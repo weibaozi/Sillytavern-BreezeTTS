@@ -143,7 +143,8 @@ test('off excludes already cached narration from play, seek, and refetch while p
     await expect(control(page, 'feedback')).toHaveText('已重新获取 2 段语音。');
     expect((await requests(request)).slice(5).map(job => job.text)).toEqual(dialogueTexts);
     await replaceMessage(page, '这段缓存旁白关闭后没有可朗读内容。');
-    await expect(panel(page)).toBeHidden();
+    await expect(panel(page)).toBeVisible();
+    await expect(control(page, 'play')).toBeDisabled();
 });
 
 test('playback seeking explicitly prepares narration and begins inside the narration timeline', async ({ page, request }) => {

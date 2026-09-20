@@ -265,16 +265,18 @@ test('an entirely filtered reply keeps its original display and creates no audio
     await setNarrator(page, 'auto');
     await configure(page, { readStreamingText: true, autoGenerate: true, autoPlay: true });
     const raw = '……\n' + speech('周启明', '……') + '\n……';
-    // The panel may still offer earlier playable replies; make the initial reply empty too.
+    // Remove earlier playable replies too, leaving only the global switch available.
     await replaceMessage(page, raw);
-    await expect(controls(page)).toBeHidden();
+    await expect(controls(page)).toBeVisible();
+    await expect(playMessage(page)).toBeDisabled();
     await page.evaluate(() => window.__breezeDemo.beginStream());
     await page.evaluate(text => window.__breezeDemo.streamText(text), raw);
     await page.evaluate(() => window.__breezeDemo.finishStream());
     await expect(bubbles(page)).toHaveAttribute('data-state', 'filtered');
     await expect(bubbles(page)).toBeDisabled();
     await expect(bubbles(page)).toContainText('已过滤');
-    await expect(controls(page)).toBeHidden();
+    await expect(controls(page)).toBeVisible();
+    await expect(playMessage(page)).toBeDisabled();
     // Cross the automatic queue's scheduling window to detect delayed empty requests.
     await page.waitForTimeout(350);
     const result = await state(request);

@@ -166,7 +166,8 @@ export function syncVoicePrompt(ctx, settings, voices = [], type = null) {
         // Always register with the fresh context: clearChat resets ST's prompt registry.
         ctx.setExtensionPrompt(PROMPT_KEY, active ? text : '', 1, safeDepth, false, 0);
         return { text, active, reason: active ? `已启用：系统提示词，聊天深度 ${safeDepth}。`
-            : !chatKey(ctx) ? '打开聊天后自动注入。'
+            : !settings.enabled ? 'Breeze 总开关已关闭；不会注入本插件的预设。'
+                : !chatKey(ctx) ? '打开聊天后自动注入。'
                 : ['quiet', 'impersonate'].includes(type) ? '本次为后台生成或用户代写，已暂停注入。'
                     : '已关闭注入；只清除本插件的提示词。' };
     } catch (error) {

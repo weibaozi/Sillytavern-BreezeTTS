@@ -210,7 +210,8 @@ test('a narration-only message defaults to cloning its reference without emotion
     await expect.poll(async () => (await requests(request)).length).toBe(1);
     expect((await requests(request))[0]).toMatchObject({ text: '午后的教室安静下来。', voice_id: narratorVoice, speech_mode: 'clone', emotion: '', cfg_scale: 1 });
     await setNarrator(page, '');
-    await expect(page.locator('#breeze-floating-controls')).toBeHidden();
+    await expect(page.locator('#breeze-floating-controls')).toBeVisible();
+    await expect(playMessage(page)).toBeDisabled();
     await expect(current(page).locator('.mes_text')).toHaveText('午后的教室安静下来。');
 });
 

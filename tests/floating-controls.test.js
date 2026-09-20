@@ -107,6 +107,85 @@ test('floating controls render hostile labels as text and disable all actions wi
     assert.equal(document.querySelector('#breeze-floating-controls'), null, 'updates cannot resurrect a destroyed panel');
 });
 
+test('master switches stay synchronized and remain usable without a reply in either layout', t => {
+    const toggles = [], collapses = [];
+    const { controls, root } = setup(t, {
+        onToggleEnabled: enabled => { toggles.push(enabled); controls.update({ enabled }); },
+        onCollapse: collapsed => collapses.push(collapsed),
+    });
+    controls.update({ visible: true });
+    const [headerSwitch, compactSwitch] = root.querySelectorAll('[data-master-toggle]');
+    const panel = root.querySelector('.breeze-floating-panel');
+    const compactGroup = root.querySelector('.breeze-floating-compact-group');
+    const expand = root.querySelector('[data-expand]');
+    assert.equal(root.querySelectorAll('[data-master-toggle]').length, 2);
+    assert.equal(compactGroup.hidden, true);
+    for (const toggle of [headerSwitch, compactSwitch]) {
+        assert.equal(toggle.getAttribute('role'), 'switch');
+        assert.equal(toggle.getAttribute('aria-label'), 'Breeze 总开关');
+        assert.equal(toggle.getAttribute('aria-checked'), 'true', 'Breeze defaults to enabled');
+        assert.equal(toggle.disabled, false);
+        assert.equal(toggle.parentElement.closest('button'), null, 'switches are never nested in another button');
+    }
+    headerSwitch.click();
+    assert.deepEqual(toggles, [false], 'master switch works before any reply exists');
+    assert.equal(controls.host.hidden, false);
+    assert.equal(panel.hidden, false);
+    for (const toggle of [headerSwitch, compactSwitch]) assert.equal(toggle.getAttribute('aria-checked'), 'false');
+    assert.equal(root.querySelector('[data-status]').textContent, '已关闭');
+    assert.equal(root.querySelector('[data-compact-status]').textContent, '已关闭');
+    root.querySelector('[data-collapse]').click();
+    assert.equal(panel.hidden, true);
+    assert.equal(compactGroup.hidden, false);
+    assert.equal(compactSwitch.parentElement, expand.parentElement, 'compact master switch is next to the expand action');
+    compactSwitch.click();
+    assert.deepEqual(toggles, [false, true]);
+    assert.equal(panel.hidden, true, 'toggling from the compact view preserves collapse');
+    assert.equal(expand.hidden, false);
+    assert.deepEqual(collapses, [true], 'the master switch does not trigger expand');
+    for (const toggle of [headerSwitch, compactSwitch]) assert.equal(toggle.getAttribute('aria-checked'), 'true');
+    assert.equal(root.querySelector('[data-compact-status]').textContent, '暂无可朗读回复');
+    for (const button of root.querySelectorAll('.breeze-message-controls button')) assert.equal(button.disabled, true);
+});
+
+test('disabled master switch blocks reply actions and cancels in-flight seeking', t => {
+    const calls = [];
+    const { controls, root, dom } = setup(t, {
+        onPlay: id => calls.push(['play', id]), onPause: id => calls.push(['pause', id]),
+        onStop: id => calls.push(['stop', id]), onRefresh: id => calls.push(['refresh', id]),
+        onSelect: id => calls.push(['select', id]), onSeek: (percent, id) => calls.push(['seek', percent, id]),
+    });
+    controls.update({ ...ready, timeline: { enabled: true, percent: 10, currentLabel: '0:12', totalLabel: '2:00' } });
+    const seek = root.querySelector('[data-seek]');
+    const select = root.querySelector('select');
+    seek.value = '65'; seek.dispatchEvent(new dom.window.Event('input'));
+    controls.update({ enabled: false, active: true, status: '播放中' });
+    assert.equal(controls.host.hidden, false);
+    assert.equal(controls.host.dataset.state, 'disabled');
+    assert.equal(root.querySelector('.breeze-message-controls').dataset.state, 'disabled');
+    assert.equal(root.querySelector('[data-status]').textContent, '已关闭');
+    assert.equal(root.querySelector('[data-compact-status]').textContent, '已关闭');
+    assert.equal(select.disabled, true);
+    assert.equal(seek.disabled, true);
+    assert.equal(seek.value, '10', 'disabling restores the authoritative seek position');
+    for (const button of root.querySelectorAll('.breeze-message-controls button')) {
+        assert.equal(button.disabled, true);
+        button.click();
+    }
+    select.value = '0'; select.dispatchEvent(new dom.window.Event('change'));
+    seek.value = '80'; seek.dispatchEvent(new dom.window.Event('input'));
+    assert.deepEqual(calls, []);
+    controls.update({ enabled: true });
+    seek.dispatchEvent(new dom.window.Event('change'));
+    assert.deepEqual(calls, [], 're-enabling cannot commit the drag started before shutdown');
+    assert.equal(select.disabled, false);
+    assert.equal(select.value, '', 'disabled selection changes do not alter the selected reply');
+    assert.equal(seek.disabled, false);
+    for (const button of root.querySelectorAll('.breeze-message-controls button')) assert.equal(button.disabled, false);
+    root.querySelector('.breeze-message-play').click();
+    assert.deepEqual(calls, [['play', 2]], 're-enabling restores permitted actions for the same reply');
+});
+
 test('seekbar previews position without losing a drag to playback updates and commits the current target', t => {
     const calls = [];
     const { controls, root, dom } = setup(t, { onSeek: (percent, id) => calls.push([percent, id]) });
