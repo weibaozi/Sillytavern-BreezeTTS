@@ -1,0 +1,4 @@
+{
+  "folders": [{ "name": "SillyTavern Breeze plugin", "path": "." }],
+  "settings": { "search.exclude": { "node_modules/**": true, "references/**": true, "experiments/**": true } }
+}

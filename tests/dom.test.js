@@ -1,0 +1,148 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+import { PROMPT_KEY, DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS } from '../extension/prompt.js';
+
+test('actual extension binds current-chat voices, creates safe bubbles, hides only display tags and restores originals', async () => {
+    const dom = new JSDOM('<div id="extensions_settings"></div><button id="extensionsMenuButton">魔棒</button><div id="extensionsMenu"></div><div id="chat"><div class="mes" mesid="0"><div class="mes_text"></div></div></div><form id="send_form"></form>', { url: 'http://127.0.0.1:8002/' });
+    const { window } = dom;
+    for (const key of ['window', 'document', 'NodeFilter', 'MutationObserver', 'Option', 'FormData']) globalThis[key] = window[key];
+    window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
+    window.HTMLMediaElement.prototype.pause = function () {};
+    const audioCreated = [];
+    globalThis.Audio = class {
+        paused = true; onended = null;
+        constructor() { audioCreated.push(this); }
+        pause() { this.paused = true; }
+        removeAttribute() {}
+        load() {}
+        play() { this.paused = false; return Promise.resolve(); }
+    };
+    const commentaryTag = '[TTSVoice:周启明:happy:[笑]你好！]';
+    const narrative = '周启明笑了。“你好！”\n[TTSVoice:周启明:happy:[笑]你好！]\n“你好！”\n[TTSVoice:周启明:happy:[笑]你好！]\n“再见。”\n[TTSVoice:林知夏:default:再见。]';
+    const raw = `<catsay>${commentaryTag}</catsay>\n${narrative}`;
+    const body = document.querySelector('.mes_text');
+    const commentary = document.createElement('catsay'); commentary.textContent = commentaryTag;
+    body.append(commentary, document.createTextNode(`\n${narrative}`));
+    const originalDisplay = body.textContent;
+    const handlers = new Map(), calls = [], voiceId = 'b'.repeat(32), jobId = 'c'.repeat(32);
+    const events = ['GENERATION_STARTED', 'GENERATION_AFTER_COMMANDS', 'PRESET_CHANGED', 'MESSAGE_RECEIVED', 'GENERATION_ENDED', 'GENERATION_STOPPED', 'CHAT_CHANGED', 'CHAT_LOADED', 'MESSAGE_SWIPED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_DELETED', 'MESSAGE_SWIPE_DELETED', 'PERSONA_CHANGED', 'CHARACTER_MESSAGE_RENDERED', 'MORE_MESSAGES_LOADED', 'GROUP_UPDATED'];
+    const ctx = { name1: '包子', characterId: 0, characters: [{ name: '周启明', avatar: 'a.png' }], chatId: 'chat-1',
+        chat: [{ mes: raw, swipe_id: 0 }], chatMetadata: {}, extensionSettings: { breeze_voice: { promptTemplate: LEGACY_DEFAULT_TEMPLATE } },
+        eventTypes: Object.fromEntries(events.map(e => [e, e])), eventSource: { on: (e, fn) => handlers.set(e, fn) },
+        saveMetadata: async () => {}, saveSettingsDebounced() {} };
+    const tgBreak = { value: 'Keep <catsay>, <w2g>, and the original format.', position: 1, depth: 0, role: 0 };
+    ctx.extensionPrompts = { tgBreak };
+    ctx.setExtensionPrompt = (key, value, position, depth, scan, role) => {
+        ctx.extensionPrompts[key] = { value, position, depth, scan, role };
+    };
+    window.SillyTavern = { getContext: () => ctx };
+    globalThis.fetch = async (url, options) => {
+        calls.push({ url, method: options.method, body: options.body });
+        const data = url.endsWith('/health') ? { version: 1, loaded: true, queued: 0 } : url.endsWith('/voices') ? { voices: [{ id: voiceId, name: '<img src=x onerror=alert(1)>', ref_text: '参考文', audio_url: `/breeze/voices/${voiceId}/audio` }] } : { id: jobId, status: 'done', audio_url: `/breeze/jobs/${jobId}/audio`, duration: 1.25 };
+        return { ok: true, json: async () => data };
+    };
+    const tick = () => new Promise(r => setTimeout(r, 180));
+    await import('../extension/index.js'); await tick();
+    const panel = document.querySelector('#breeze-studio-host').shadowRoot;
+    assert.equal(ctx.extensionSettings.breeze_voice.promptTemplate, DEFAULT_TEMPLATE, 'unchanged old default migrates to dynamic vocal example');
+    assert.equal(panel.querySelector('[data-vocal-events]').value, DEFAULT_VOCAL_EVENTS);
+    assert.equal(panel.querySelector('[data-extra-prompt]').value, '');
+    assert.equal(panel.querySelector('[data-extra-prompt-enabled]').checked, false);
+    assert.equal(document.querySelector('#extensions_settings').children.length, 0, 'no built-in settings UI');
+    assert.equal(document.querySelector('#send_form').children.length, 0, 'no separate input-bar button');
+    assert.equal(document.querySelectorAll('#extensionsMenu #breeze_studio_wand_entry').length, 1);
+    assert.ok(ctx.extensionPrompts[PROMPT_KEY].value.includes('[TTSVoice:'));
+    assert.equal(ctx.extensionPrompts[PROMPT_KEY].position, 1);
+    assert.equal(ctx.extensionPrompts[PROMPT_KEY].role, 0);
+    assert.equal(ctx.extensionPrompts.tgBreak, tgBreak);
+    assert.equal(document.querySelectorAll('.breeze-bubble').length, 3);
+    assert.equal(document.querySelectorAll('.breeze-original[hidden]').length, 3);
+    assert.equal(commentary.textContent, commentaryTag, 'identical tags in commentary are not matched as body speech');
+    assert.equal(commentary.querySelector('.breeze-bubble'), null);
+    assert.equal(ctx.chat[0].mes, raw, 'raw conversation must not be changed');
+    assert.equal(calls.filter(c => c.method === 'POST').length, 0, 'opening history must not synthesize');
+    assert.equal(panel.querySelectorAll('img').length, 0, 'voice names are text, not HTML');
+    document.querySelector('#breeze_studio_wand_entry').click(); panel.querySelector('[data-tab="characters"]').click();
+    const row = [...panel.querySelectorAll('.breeze-row')].find(r => r.textContent.includes('周启明'));
+    const select = row.querySelector('select'); select.value = voiceId; select.dispatchEvent(new window.Event('change'));
+    await tick();
+    assert.equal(ctx.chatMetadata.breeze_voice.mappings['周启明'], voiceId);
+    const template = panel.querySelector('[data-prompt-template]');
+    template.value = 'Bound:\n{{bound_characters_section}}\nNew:\n{{unbound_characters_section}}\n{{vocal_events}} {{user}} {{char}}';
+    panel.querySelector('[data-save-prompt]').click();
+    assert.ok(ctx.extensionPrompts[PROMPT_KEY].value.includes('Bound:\n  - "周启明"'));
+    assert.ok(ctx.extensionPrompts[PROMPT_KEY].value.includes('New:\n  - "林知夏"'));
+    assert.ok(ctx.extensionPrompts[PROMPT_KEY].value.includes('[笑]'));
+    assert.equal(panel.querySelector('[data-prompt-preview]').value, ctx.extensionPrompts[PROMPT_KEY].value);
+    assert.equal(ctx.extensionSettings.breeze_voice.promptTemplate, template.value);
+    const injection = panel.querySelector('[data-setting="injectPrompt"]');
+    injection.checked = false; injection.dispatchEvent(new window.Event('change'));
+    assert.equal(ctx.extensionPrompts[PROMPT_KEY].value, '');
+    injection.checked = true; injection.dispatchEvent(new window.Event('change'));
+    assert.ok(ctx.extensionPrompts[PROMPT_KEY].value);
+    handlers.get('GENERATION_AFTER_COMMANDS')('quiet', {}, false);
+    assert.equal(ctx.extensionPrompts[PROMPT_KEY].value, '');
+    handlers.get('GENERATION_AFTER_COMMANDS')('impersonate', {}, false);
+    assert.equal(ctx.extensionPrompts[PROMPT_KEY].value, '');
+    ctx.extensionPrompts = { tgBreak }; // ST clears its registry when replacing a chat.
+    handlers.get('GENERATION_AFTER_COMMANDS')('normal', {}, true);
+    assert.ok(ctx.extensionPrompts[PROMPT_KEY].value, 'dry-run re-registers the current saved prompt');
+    panel.querySelector('[data-reset-prompt]').click();
+    assert.equal(template.value, DEFAULT_TEMPLATE);
+    assert.equal(ctx.extensionPrompts.tgBreak, tgBreak);
+    document.querySelector('.breeze-bubble').click(); await tick();
+    const request = JSON.parse(calls.find(c => c.method === 'POST').body);
+    assert.equal(request.text, '[笑]你好！'); assert.equal(request.voice_id, voiceId);
+    assert.equal(audioCreated.length, 1); audioCreated[0].onended(); await tick();
+    document.querySelectorAll('.breeze-bubble')[1].click(); await tick();
+    assert.equal(calls.filter(c => c.method === 'POST').length, 1, 'identical text/voice reuses audio');
+    audioCreated[1].onended(); await tick();
+    const autoPlay = panel.querySelector('[data-setting="autoPlay"]');
+    autoPlay.checked = true; autoPlay.dispatchEvent(new window.Event('change')); await tick();
+    handlers.get('GENERATION_STARTED')('normal', {}, false);
+    const newText = '[TTSVoice:周启明:default:这是新回复。]\n[TTSVoice:林知夏:default:这句未绑定。]';
+    ctx.chat.push({ mes: newText, swipe_id: 0 });
+    const nextMessage = document.createElement('div'); nextMessage.className = 'mes'; nextMessage.setAttribute('mesid', '1');
+    const nextBody = document.createElement('div'); nextBody.className = 'mes_text'; nextBody.textContent = newText;
+    nextMessage.append(nextBody); document.querySelector('#chat').append(nextMessage);
+    await tick();
+    assert.equal(calls.filter(c => c.method === 'POST').length, 1, 'streaming must not synthesize');
+    handlers.get('GENERATION_ENDED')(); await tick();
+    assert.equal(calls.filter(c => c.method === 'POST').length, 1, 'generation end alone does not guess a message');
+    handlers.get('MESSAGE_RECEIVED')(1, 'normal'); await tick(); await tick();
+    assert.equal(calls.filter(c => c.method === 'POST').length, 2, 'only mapped speaker is synthesized on completion');
+    assert.equal(audioCreated.length, 3, 'new reply starts automatic playback');
+    handlers.get('GENERATION_ENDED')(); await tick();
+    assert.equal(audioCreated.length, 3, 'duplicate end event does not replay');
+    audioCreated[2].onended(); await tick();
+    handlers.get('GENERATION_STARTED')('normal', {}, false);
+    const thirdText = '[TTSVoice:周启明:default:普通非流式回复。]';
+    ctx.chat.push({ mes: thirdText, swipe_id: 0 });
+    const thirdMessage = nextMessage.cloneNode(false); thirdMessage.setAttribute('mesid', '2');
+    const thirdBody = nextBody.cloneNode(false); thirdBody.textContent = thirdText;
+    thirdMessage.append(thirdBody); document.querySelector('#chat').append(thirdMessage);
+    handlers.get('MESSAGE_RECEIVED')(2, 'normal'); await tick();
+    assert.equal(audioCreated.length, 3, 'nonstream message also waits for generation end');
+    handlers.get('GENERATION_ENDED')(); await tick(); await tick();
+    assert.equal(audioCreated.length, 4, 'supports both event orders');
+    const previousMetadata = ctx.chatMetadata;
+    ctx.chatId = 'chat-2'; ctx.chatMetadata = {};
+    handlers.get('CHAT_CHANGED')(); await tick();
+    assert.equal(audioCreated[3].paused, true, 'switching chat stops playback');
+    assert.equal(previousMetadata.breeze_voice.mappings['周启明'], voiceId);
+    assert.ok(ctx.extensionPrompts[PROMPT_KEY].value.includes('(None currently bound.)'));
+    assert.equal(ctx.chatMetadata.breeze_voice, undefined, 'mapping is not copied to another chat');
+    assert.equal(document.querySelectorAll('[data-state="unmapped"]').length, 6);
+    const enabled = panel.querySelector('[data-setting="enabled"]'); enabled.checked = false; enabled.dispatchEvent(new window.Event('change')); await tick();
+    assert.equal(document.querySelectorAll('.breeze-bubble').length, 0);
+    assert.equal(ctx.extensionPrompts[PROMPT_KEY].value, '', 'disabling plugin clears own prompt');
+    assert.equal(ctx.extensionPrompts.tgBreak, tgBreak, 'other format directives remain untouched');
+    assert.equal(body.textContent, originalDisplay, 'disabling restores only the original tag text');
+    panel.querySelector('dialog').close();
+    assert.equal(document.activeElement.id, 'extensionsMenuButton');
+    document.querySelector('#breeze_studio_wand_entry').click();
+    assert.equal(document.querySelectorAll('#breeze-studio-host').length, 1, 'reopening reuses one panel');
+    dom.window.close();
+});

@@ -1,0 +1,53 @@
+[Voice Synthesis & Dialogue Protocol]
+Preserve the existing prose style, output language, and all unrelated preset requirements.
+{{primary_character_note}}
+
+### Core Rules:
+
+1. **Character Naming Consistency**:
+   - Use each character's exact, consistent name in TTS tags, never pronouns or alternate nicknames. Keep natural narration; do not require a "Name:" script format.
+
+2. **Dialogue Tagging Format**:
+   - After EVERY eligible spoken paragraph, immediately add a separate plain-text line:
+     [TTSVoice:Character_Name:emotion:Spoken dialogue]
+   - Keep the original dialogue in the prose. Copy all speech from that paragraph into its tag, preserving wording, order, and punctuation; remove surrounding quotes, Markdown, and narration.
+   - Each spoken paragraph contains only one speaker. Combine that speaker's quoted passages within the paragraph; different paragraphs each need their own tag.
+   - Complete the paragraph and its tag before continuing. Short replies, consecutive remarks, questions, and closing lines are not exceptions. Silently check the penultimate and final eligible spoken paragraphs before ending the body.
+   - Do not tag {{user}}'s speech, narration, thoughts, unspoken quotations, text messages, or content in <w2g>, <catsay>, summaries, and status panels.
+   - TTS tags are permitted body metadata. Repeated dialogue and emotion fields are exempt from prose rules against repetition or delivery annotations, and do not count toward the prose length limit.
+   - Use the exact prefix TTSVoice. Names and emotions cannot contain colons, square brackets, or line breaks. Keep each complete tag on one line, without bold or code fences.
+
+3. **Emotion Continuity**:
+   - Follow the permitted emotions and their usage rules. Use default for neutral delivery. Avoid abrupt emotional extremes without narrative cause.
+
+4. **Speaker Categories & Permitted Emotions**:
+   - **List 1: Bound Voice Characters** — use their listed emotions:
+{{bound_characters_section}}
+   - **List 2: Skipped Characters** — ordinary prose only, NO TTS tag:
+{{skipped_characters_section}}
+   - **List 3: New / Unbound Characters** — use `[TTSVoice:New_Character_Name:New:Spoken dialogue]` after their spoken paragraphs. The exclusions in Rule 2 still apply.
+
+5. **Breeze Vocal Events**:
+   - Inside the TTS dialogue field, optionally insert these exact Chinese tags at the intended audible moment: [笑], [叹气], [咳嗽], [清嗓子]. Do not translate them.
+   - Use them sparingly when appropriate, not in every line. A smile alone is not audible laughter. Silent actions and thoughts belong in narration, not in audio tags.
+   - These vocal events are the only additions to the copied dialogue. They need not appear in the readable prose. Close each inner bracket pair, then close the outer TTSVoice bracket.
+
+### Demonstrations:
+
+✅ Correct:
+周启明笑出了声。“你怎么才来？”
+[TTSVoice:周启明:happy:[笑]你怎么才来？]
+
+“等一下。”沈予安合上本子。“现在可以了。”
+[TTSVoice:沈予安:default:等一下。现在可以了。]
+
+林知夏回头看向 {{user}}。“那你选哪份？”
+[TTSVoice:林知夏:default:那你选哪份？]
+
+❌ Incorrect:
+[TTSVoice:周启明:happy:他笑着打开门。]
+Reason: narration is not spoken dialogue.
+
+“等一下。”沈予安合上本子。“现在可以了。”
+[TTSVoice:沈予安:default:现在可以了。]
+Reason: the first spoken sentence was omitted.

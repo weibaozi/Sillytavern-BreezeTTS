@@ -1,0 +1,46 @@
+[
+  {
+    "Target": "PLAN_酒馆语音集成.md",
+    "Source": "PLAN_酒馆语音集成.md"
+  },
+  {
+    "Target": "experiments/prompt-trials",
+    "Source": "outputs/tts_prompt_trials"
+  },
+  {
+    "Target": "references/echocore",
+    "Source": "outputs/echocore_reference"
+  },
+  {
+    "Target": "docs/EchoCore参考结论.md",
+    "Source": "outputs/EchoCore参考结论.md"
+  },
+  {
+    "Target": "fixtures/青禾大学_三角色语音测试世界书.json",
+    "Source": "outputs/青禾大学_三角色语音测试世界书.json"
+  },
+  {
+    "Target": "prompts/酒馆_短标记输出规范_EchoCore参考草案.txt",
+    "Source": "outputs/酒馆_短标记输出规范_EchoCore参考草案.txt"
+  },
+  {
+    "Target": "prompts/酒馆_Breeze语音短标记_英文预设.txt",
+    "Source": "outputs/酒馆_Breeze语音短标记_英文预设.txt"
+  },
+  {
+    "Target": "prompts/酒馆_TTSVoice输出规范_英文精简版.txt",
+    "Source": "outputs/酒馆_TTSVoice输出规范_英文精简版.txt"
+  },
+  {
+    "Target": "prompts/酒馆_TTSVoice输出规范_TGbreak兼容版.txt",
+    "Source": "outputs/酒馆_TTSVoice输出规范_TGbreak兼容版.txt"
+  },
+  {
+    "Target": "prompts/酒馆_TTSVoice输出规范.txt",
+    "Source": "outputs/酒馆_TTSVoice输出规范.txt"
+  },
+  {
+    "Target": "prompts/TGbreak_原思维-格式_TTS兼容版.txt",
+    "Source": "outputs/TGbreak_原思维-格式_TTS兼容版.txt"
+  }
+]
