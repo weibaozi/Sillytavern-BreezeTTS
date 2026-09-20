@@ -1,4 +1,4 @@
-# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.3（实验分支）
+# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.4（实验分支）
 
 模型只写一份 `[TTSVoice:角色名:情绪:对白]`，插件在显示层把它呈现为普通引号对白和播放气泡。原始聊天 `mes` 保持不变，已绑定角色连接原 Breeze WebUI 合成及播放；未绑定角色仍显示对白，仅跳过语音。原有独立工作室、音色库、流式播放、语气词设置和共享语料库保留。
 
@@ -22,7 +22,7 @@
    G:\study\AI\SillyTavern-Launcher\SillyTavern\data\default-user\extensions\sillytavern-breeze\
    ```
 
-   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.3.zip`。
+   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.4.zip`。
 
    ```powershell
    .\install.ps1 -SillyTavernPath 'G:\study\AI\SillyTavern-Launcher\SillyTavern' -InstallExperimental
@@ -81,6 +81,17 @@
 
 机制参考 [EchoCore 的提示词注入器](https://github.com/haide-D/SillyTavern-EchoCore/blob/main/frontend/js/prompt_injector.js)，实际参数及生成事件按本机酒馆源码校验。原手工模板保留在 `prompts/` 供对照。
 
+
+## 旁白朗读
+
+在「角色与音色 → 旁白声音」为当前聊天选择本地音色，情绪默认「平稳口气，配音」，可填写简短发声要求。音色和情绪随聊天保存；选择「不朗读旁白」关闭，音色失效也会跳过。旁白不加入角色名单或注入预设，不需要模型输出新标签。
+
+消息底部「播放本条」和「自动播放全文」按原文顺序穿插旁白及已绑定角色对白；单个对白气泡仍只播放该句。仅开启自动生成时也会准备旁白音频，已有缓存继续复用。旁白正文外观保持原样，只有旁白的消息也可整条播放。
+
+旁白从正文文字提取，排除 TTSVoice、引号内台词、代码、图片、正文前后模块及咪咪吐槽、摘要等，不会把历史双份对白的引号副本再当旁白读出。流式读取等完整句、换行或明确的对白边界再入队，结束时补读尾句；停止、切换聊天或修改旁白设置会取消旧队列。续写自动播放只读新增部分。
+
+提取依赖文本结构，不识别所有自定义正则和 CSS 隐藏规则；自定义正文外模块需另行接入排除列表。没有 TTS 标签的引号对白继续跳过，不猜测说话人。
+
 ## 已实现
 
 - 魔棒菜单入口与独立工作室：角色、音色库、声音设计、预设、连接五页；桌面和手机布局，样式通过 Shadow DOM 隔离，Esc 关闭并返回入口焦点。切页和关闭时暂停试听。
@@ -103,6 +114,8 @@
 - 消息内新角色「就地绑定／跳过」和可配置语气词预设组仍在计划中。自动 prompt 注入已实现。
 
 ## 验证状态
+
+0.7.0-tag-render.4：98 项单元／DOM 测试及语法检查通过；新增 11 项旁白 Edge 浏览器用例通过，覆盖混合播放、聊天绑定、流式和续写、取消及 375px 布局。48 项旧浏览器用例逐项通过；该次旧回归进程在收尾阶段无输出挂起，已手动终止，未作为正常退出的整套运行记录。测试使用模拟接口和演示音频，尚未验证真实旁白音色听感。
 
 0.7.0-tag-render.3 仅更新英文提示词：强化单份对白，允许贴合角色与语境的简短情绪短语。24 项预设／DOM 测试及 JavaScript 语法检查通过；未重新运行浏览器全套用例，未测真实模型遵循率。
 

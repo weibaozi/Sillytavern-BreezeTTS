@@ -5,6 +5,7 @@ import { AutomaticSpeechQueue } from './automatic-queue.js';
 import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
 import { listExtraPresets, createExtraPreset, updateExtraPreset, deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from './extra-prompts.js';
 import { displayDialogue, hasLegacyDialogue } from './dialogue-render.js';
+import { parseNarration } from './narration.js';
 import { createStudioPanel } from './panel.js';
 import { mountStudioEntry } from './menu.js';
 
@@ -19,6 +20,18 @@ const liveMessageIds = new Set();
 let injectionType = null;
 let serviceState = 'offline', supportsStreaming = false, previewAudio, previewButton;
 const memory = new Map();
+const DEFAULT_NARRATOR_EMOTION = '平稳口气，配音';
+
+function narratorConfig(data = meta()) {
+    const saved = data.narrator || {};
+    return { voiceId: typeof saved.voiceId === 'string' ? saved.voiceId : '',
+        emotion: typeof saved.emotion === 'string' && saved.emotion.trim() ? saved.emotion.trim().slice(0, 300) : DEFAULT_NARRATOR_EMOTION };
+}
+function itemVoice(item) {
+    if (item.segment.kind !== 'narration') return mappedVoice(meta().mappings, item.segment.speaker, voices);
+    const { voiceId } = narratorConfig();
+    return voices.some(voice => voice.id === voiceId) ? voiceId : null;
+}
 
 function meta(create = false) {
     const ctx = context();
@@ -161,7 +174,7 @@ function update(item, state, error = '', duration) {
 async function prepare(item, signal, { stream = false } = {}) {
     checkAbort(signal);
     if (!valid(item)) throw new Error('消息已变化，请重新点击。');
-    const voiceId = mappedVoice(meta().mappings, item.segment.speaker, voices);
+    const voiceId = itemVoice(item);
     if (!voiceId) throw new Error('尚未绑定有效音色，请在 Breeze 语音面板中选择。');
     const api = client;
     const request = requestFor(item.segment, voiceId, settings);
@@ -225,7 +238,7 @@ function invalidate() {
 }
 async function play(item) {
     if (!settings.enabled) return;
-    if (!mappedVoice(meta().mappings, item.segment.speaker, voices)) { openPanel('characters'); return; }
+    if (!itemVoice(item)) { openPanel('characters'); return; }
     if (automaticQueue.busy && player.current?.id !== item.id) { stopPlayback(); allowAutomatic = false; autoPending.clear(); }
     stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
     player.volume = Number(settings.volume);
@@ -237,7 +250,7 @@ function bubble(item) {
     button.addEventListener('click', () => { void play(item); });
     button.addEventListener('contextmenu', event => {
         event.preventDefault(); stopPlayback();
-        const id = mappedVoice(meta().mappings, item.segment.speaker, voices);
+        const id = itemVoice(item);
         if (id) {
             const key = cacheKey(client.base, requestFor(item.segment, id, settings));
             memory.delete(key); const data = meta(true); delete data.cache[key]; context().chatMetadata[KEY] = data; void saveMeta();
@@ -266,7 +279,7 @@ function insertBubbles(container, messageItems, pending = []) {
     const body = container.querySelector('.mes_text'); if (!body) return;
     const map = textMap(body); let cursor = 0;
     const replacements = [], fallback = [];
-    const displayItems = [...messageItems, ...pending.map(segment => ({ segment, pending: true,
+    const displayItems = [...messageItems.filter(item => item.segment.kind !== 'narration'), ...pending.map(segment => ({ segment, pending: true,
         displayText: displayDialogue(segment.text || '', settings.vocalEvents) }))].sort((a, b) => a.segment.start - b.segment.start);
     for (const item of displayItems) {
         const start = item.pending ? map.text.lastIndexOf(item.segment.raw) : map.text.indexOf(item.segment.raw, cursor);
@@ -293,7 +306,7 @@ function insertBubbles(container, messageItems, pending = []) {
     const tray = el('div', null, 'breeze-tray');
     const all = el('button', '▶ 播放本条', 'menu_button'); all.type = 'button';
     all.addEventListener('click', () => {
-        const eligible = messageItems.filter(i => mappedVoice(meta().mappings, i.segment.speaker, voices));
+        const eligible = messageItems.filter(item => itemVoice(item));
         if (!eligible.length) return openPanel('characters');
         stopPlayback(); allowAutomatic = false; autoPending.clear();
         player.volume = Number(settings.volume);
@@ -354,6 +367,19 @@ function renderMessages(onlyMessageId) {
             else if (item.state === 'unmapped') item.state = 'idle';
             next.set(id, item); return item;
         });
+        const narrator = narratorConfig();
+        const narration = voices.some(voice => voice.id === narrator.voiceId) ? parseNarration(msg.mes, ctx.name1, { streaming: live }) : [];
+        for (const segment of narration) {
+            segment.emotion = narrator.emotion;
+            const id = JSON.stringify([key, messageId, msg.swipe_id ?? 0, epoch, 'narration', segment.start, segment.raw]);
+            const previous = items.get(id);
+            const item = previous?.epoch === epoch && valid(previous) ? previous : { id, chat: key, messageId, rawMessage: msg.mes,
+                swipe: msg.swipe_id ?? 0, segment, epoch, state: 'idle' };
+            if (!itemVoice(item)) item.state = 'unmapped';
+            else if (item.state === 'unmapped') item.state = 'idle';
+            next.set(id, item); entries.push(item);
+        }
+        entries.sort((a, b) => a.segment.start - b.segment.start);
         if (entries.length || pending.length) insertBubbles(container, entries, pending);
         if (diagnostics.length) {
             const note = el('div', `Breeze：${diagnostics.length} 个标签格式异常，已跳过。`, 'breeze-tray breeze-warning');
@@ -397,6 +423,7 @@ function selectVoice(value) {
 function renderCharacters() {
     const root = dialog?.querySelector('[data-characters]'); if (!root) return;
     stopPreview();
+    renderNarrator();
     root.replaceChildren(); const ctx = context(), key = chatKey(ctx);
     refreshStudioSummary();
     if (!key) { root.append(el('p', '打开一个聊天，角色就会出现在这里。', 'empty-state')); return; }
@@ -429,6 +456,21 @@ function renderCharacters() {
         preview.onclick = () => { if (voice) void previewVoice(voice, preview); };
         controls.append(select, preview); row.append(controls); root.append(row);
     }
+}
+function renderNarrator() {
+    const select = dialog?.querySelector('[data-narrator-voice]'); if (!select) return;
+    const key = chatKey(context()), config = narratorConfig(), voice = voices.find(value => value.id === config.voiceId);
+    const options = selectVoice(config.voiceId);
+    options.options[0].textContent = '不朗读旁白';
+    select.replaceChildren(...options.childNodes); select.value = config.voiceId;
+    select.disabled = !key; select.dataset.chat = key;
+    const emotion = dialog.querySelector('[data-narrator-emotion]');
+    if (emotion.dataset.chat !== key || dialog.getRootNode().activeElement !== emotion) emotion.value = config.emotion;
+    emotion.dataset.chat = key; emotion.disabled = !key;
+    dialog.querySelector('[data-narrator-preview]').disabled = !key || !voice;
+    studioText('[data-narrator-status]', !key ? '打开一个聊天后，为旁白选择音色。'
+        : voice ? `已启用 · ${voice.name} · 全部播放与自动播放会按正文顺序朗读旁白。`
+        : config.voiceId ? '原旁白音色已不可用，请重新选择；当前跳过旁白。' : '尚未选择音色，当前跳过旁白。');
 }
 function renderVoices() {
     const root = dialog?.querySelector('[data-voices]'); if (!root) return;
@@ -469,6 +511,26 @@ function buildPanel() {
         event.target.volume = Number(settings.volume);
         dialog.querySelectorAll('audio').forEach(audio => { if (audio !== event.target) audio.pause(); });
     }, true);
+    const narratorVoice = dialog.querySelector('[data-narrator-voice]');
+    const narratorEmotion = dialog.querySelector('[data-narrator-emotion]');
+    const saveNarrator = event => {
+        const key = chatKey(context());
+        if (!key || event.target.dataset.chat !== key) { renderNarrator(); return; }
+        if (narratorEmotion.value.length > 300) { narratorEmotion.reportValidity(); return; }
+        invalidate();
+        const data = meta(true);
+        data.narrator = { voiceId: narratorVoice.value, emotion: narratorEmotion.value.trim() || DEFAULT_NARRATOR_EMOTION };
+        narratorEmotion.value = data.narrator.emotion;
+        context().chatMetadata[KEY] = data; void saveMeta();
+        // Narrator settings affect only playback; they never enter the voice prompt.
+        clearTimeout(renderTimer); renderTimer = null; render(); renderNarrator();
+    };
+    narratorVoice.addEventListener('change', saveNarrator);
+    narratorEmotion.addEventListener('change', saveNarrator);
+    dialog.querySelector('[data-narrator-preview]').addEventListener('click', event => {
+        const voice = voices.find(value => value.id === narratorConfig().voiceId);
+        if (voice && chatKey(context())) void previewVoice(voice, event.currentTarget);
+    });
     for (const input of dialog.querySelectorAll('[data-setting]')) {
         const key = input.dataset.setting;
         if (input.type === 'checkbox') input.checked = settings[key]; else input.value = settings[key];
@@ -688,7 +750,20 @@ function automatic(ids) {
         if (!ids.has(item.messageId) || consumed.has(item.id)) continue;
         if (generationType === 'continue' && item.messageId === continueMessageId && item.segment.end <= continueCutoff) continue;
         consumed.add(item.id);
-        if (mappedVoice(meta().mappings, item.segment.speaker, voices) && valid(item)) { selected.push(item); update(item, 'queued'); }
+        if (!itemVoice(item) || !valid(item)) continue;
+        let queued = item;
+        if (generationType === 'continue' && item.messageId === continueMessageId && item.segment.kind === 'narration'
+            && item.segment.start < continueCutoff) {
+            // A continuation may extend the last unfinished narrative sentence.
+            // Full-message replay keeps that sentence intact; automatic playback
+            // reads only the newly appended words, just like completed old tags.
+            const raw = item.rawMessage.slice(continueCutoff, item.segment.end);
+            const text = parseNarration(raw, context().name1).map(segment => segment.text).join(' ');
+            if (!text) continue;
+            queued = { ...item, id: JSON.stringify([item.id, 'continue', continueCutoff]),
+                segment: { ...item.segment, start: continueCutoff, raw, text } };
+        }
+        selected.push(queued); update(queued, 'queued');
     }
     if (consumed.size > 2000) consumed = new Set([...consumed].slice(-1000));
     if (!selected.length) return;

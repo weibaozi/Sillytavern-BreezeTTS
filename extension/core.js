@@ -5,7 +5,7 @@ export const DEFAULTS = Object.freeze({
     autoPlay: false, streaming: false, readStreamingText: false, volume: 0.8, hideTags: true, cfgScale: 4, seed: 42,
 });
 
-function excludedText(raw, streaming = false) {
+export function excludedText(raw, streaming = false) {
     // Keep character offsets intact so rendered tags can be matched to raw messages.
     const blank = s => s.replace(/[^\r\n]/g, ' ');
     let text = raw.replace(/```[^]*?(?:```|$)|~~~[^]*?(?:~~~|$)/g, blank);

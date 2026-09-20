@@ -59,7 +59,7 @@ test('vocal-event list starts with four defaults and updates both preview and in
     let preview = await field(page, 'prompt-preview').inputValue();
     expect(preview).not.toContain('[笑]');
     expect(preview).not.toContain('[叹气]');
-    expect(preview).toContain('[TTSVoice:周启明:happy:[喘气]');
+    expect(preview).toContain('[TTSVoice:周启明:softly reassuring:[喘气]');
     expect(await injected(page)).toBe(preview);
     expect(await page.evaluate(() => window.__breezeDemo.context.extensionSettings.breeze_voice.vocalEvents)).toBe('[喘气]\n[轻笑]');
     await expect(field(page, 'prompt-template')).toHaveValue(template);
