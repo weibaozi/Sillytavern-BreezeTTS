@@ -1,8 +1,20 @@
-# 酒馆 × Breeze TTS 实施计划
+# 酒馆 × Breeze TTS 实施计划 · 0.7.0-tag-render.1
 
-状态：0.6.1 强化正常对白与 TTS 副本成对输出；0.6.0 已完成可命名复用语料库及聊天独立绑定，0.5.0 已完成语气词编辑与实时预览。独立工作室与魔棒入口已在真实酒馆中打开验证。完整模型联调待完成。2026-09-19。
+状态：新建 `experiment/ttsvoice-render` 实验分支，开发单份 TTSVoice 对白的显示渲染；真实酒馆仍使用稳定版，未安装实验。稳定分支 `stable/v0.6.1` 与标签 `v0.6.1` 保留在 `60df1f8`。2026-09-19。
 
-工作区：TTS 继续在原目录修改；插件位于 `sillytavern-breeze/`。分别使用原目录 `TTS.code-workspace` 与本目录 `酒馆插件.code-workspace`。安装步骤见 [README](README.md)。
+工作区：TTS 仍在 `G:\study\AI\breeze-tts`，稳定插件在其 `sillytavern-breeze` 下；实验插件在 `G:\study\AI\breeze-tts\sillytavern-breeze\branches\ttsvoice-render`。使用各目录自己的工作区文件；本实验不更改后端。安装步骤见 [README](README.md)。
+
+## 本次实验：单份对白
+
+- 模型仅输出 `[TTSVoice:角色名:情绪:对白]`；显示层呈现普通引号对白与气泡，原始 `mes` 保持不变。未绑定人物也能读到对白，只跳过合成。
+- 当前配置与历史默认四项语气词仅在显示时移除，未知括号保留，发送 TTS 时保留原发声标签。
+- 旧版紧邻段落的引号全文精确匹配时省略重复显示，属于保守启发式，不对任意旧格式作迁移保证。
+- 默认五条英文规则及可选第六条聊天语料保留；实验模板使用 `tagRenderPromptTemplate`，稳定的 `settings.promptTemplate` 不覆盖。其余设置继续共用。
+- 新显示模块为 `dialogue-render.js`，实验包名 `dist/sillytavern-breeze-0.7.0-tag-render.1.zip`。安装需显式 `-InstallExperimental`，不要与稳定版并装；本次未执行实际安装。
+- 70 项单元／DOM 测试、35 项不同浏览器用例和语法检查通过。浏览器使用模拟酒馆与音频；桌面及 375px 手机截图已目视检查。安装 guard 和 `-WhatIf` 已验证，稳定目录和真实酒馆原运行文件一致；真实模型遵循率尚未验收。
+- 具体实现、TGbreak 新片段与回退限制见 [单份对白方案](docs/单份对白方案.md)。
+
+以下第 1–11 节保留 **0.6.1 及之前的原实施计划和历史记录**；其中双份对白、旧安装及验证数字描述的是稳定版，不是本实验当前状态。
 
 ## 1. 目标与已确认的规则
 

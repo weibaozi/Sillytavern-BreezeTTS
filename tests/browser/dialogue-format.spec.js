@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { DEFAULTS } from '../../extension/core.js';
-import { DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, PROMPT_DEFAULTS } from '../../extension/prompt.js';
+import { DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, PROMPT_DEFAULTS } from '../../extension/prompt.js';
 
 const storageKey = 'breeze-studio-demo-v1';
 const studio = page => page.locator('#breeze-studio-host').locator('dialog');
@@ -30,6 +30,9 @@ async function seedSavedTemplate(page, template) {
                 { id: 'quiet-library', name: '图书馆', text: '压低声音，情绪平稳。' },
             ],
         };
+        // Stable installs do not yet have an experimental template. Preserve
+        // their original setting while allowing this branch to seed its own.
+        delete settings.tagRenderPromptTemplate;
         const chats = {
             'demo-campus-chat': {
                 breeze_voice: {
@@ -49,15 +52,15 @@ async function seedSavedTemplate(page, template) {
     }, { template, storageKey, defaults: { ...DEFAULTS, ...PROMPT_DEFAULTS } });
 }
 
-async function expectPreservedConfiguration(page, saved, template) {
+async function expectPreservedConfiguration(page, saved, template = DEFAULT_TEMPLATE) {
     const actual = await page.evaluate(storageKey => ({
         settings: window.__breezeDemo.context.extensionSettings.breeze_voice,
         metadata: window.__breezeDemo.context.chatMetadata,
         persisted: JSON.parse(sessionStorage.getItem(storageKey)),
     }), storageKey);
-    expect(actual.settings).toEqual({ ...saved.settings, promptTemplate: template });
+    expect(actual.settings).toEqual({ ...saved.settings, tagRenderPromptTemplate: template });
     expect(actual.metadata).toEqual(saved.chats['demo-campus-chat']);
-    expect(actual.persisted.settings.breeze_voice).toEqual({ ...saved.settings, promptTemplate: template });
+    expect(actual.persisted.settings.breeze_voice).toEqual({ ...saved.settings, tagRenderPromptTemplate: template });
     expect(actual.persisted.chats).toEqual(saved.chats);
     await expect(field(page, 'prompt-template')).toHaveValue(template);
     await expect(field(page, 'vocal-events')).toHaveValue('[轻笑]\n[吸气]');
@@ -82,11 +85,12 @@ test.beforeEach(async ({ page, request }) => {
     await expect(page.locator('#breeze_studio_wand_entry')).toBeAttached();
 });
 
-test('unchanged 0.5/0.6 default upgrades on boot, retaining chat bindings and updating live injection without restore', async ({ page, request }) => {
+for (const [version, stableTemplate] of [['0.5/0.6', PREVIOUS_DEFAULT_TEMPLATE], ['0.6.1', STABLE_DEFAULT_TEMPLATE]]) {
+test(`${version} stable default is preserved while this branch independently initializes its single-copy template`, async ({ page, request }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    const saved = await seedSavedTemplate(page, PREVIOUS_DEFAULT_TEMPLATE);
-    expect(DEFAULT_TEMPLATE).not.toBe(PREVIOUS_DEFAULT_TEMPLATE);
+    const saved = await seedSavedTemplate(page, stableTemplate);
+    expect(DEFAULT_TEMPLATE).not.toBe(stableTemplate);
     let firstPreview;
     for (let attempt = 0; attempt < 2; attempt++) {
         await page.reload();
@@ -100,16 +104,24 @@ test('unchanged 0.5/0.6 default upgrades on boot, retaining chat bindings and up
     expect(state.requests).toEqual([]);
     expect(errors).toEqual([]);
 });
+}
 
-test('a user-edited old default retains its formatting constraints through boot and reload', async ({ page, request }) => {
+test('custom stable template remains untouched and inactive until explicitly copied into the experimental editor', async ({ page, request }) => {
     const constraints = '\n\nMy existing preset constraints: keep <w2g>, <catsay>, and the summary in their original order. Keep every quoted line in ordinary prose.\nDo not change my scene pacing or paragraph style.';
     const template = PREVIOUS_DEFAULT_TEMPLATE + constraints;
     const saved = await seedSavedTemplate(page, template);
     for (let attempt = 0; attempt < 2; attempt++) {
         await page.reload();
         await openPrompt(page);
-        const preview = await expectPreservedConfiguration(page, saved, template);
-        expect(preview).toContain(constraints);
+        const preview = await expectPreservedConfiguration(page, saved);
+        expect(preview).not.toContain(constraints);
     }
+    await field(page, 'prompt-template').fill(template);
+    await field(page, 'save-prompt').click();
+    await expect.poll(() => injected(page)).toContain(constraints);
+    await page.reload();
+    await openPrompt(page);
+    const preview = await expectPreservedConfiguration(page, saved, template);
+    expect(preview).toContain(constraints);
     expect((await (await request.get('/__demo/state')).json()).requests).toEqual([]);
 });

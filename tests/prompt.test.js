@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { KEY, DEFAULTS } from '../extension/core.js';
-import { PROMPT_KEY, DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, PROMPT_DEFAULTS, parseVocalEvents, buildVoicePrompt, syncVoicePrompt } from '../extension/prompt.js';
+import { PROMPT_KEY, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, PROMPT_DEFAULTS, parseVocalEvents, buildVoicePrompt, syncVoicePrompt } from '../extension/prompt.js';
 
 const voices = [{ id: 'voice-1', name: 'PRIVATE_LIBRARY_NAME_1' }, { id: 'voice-2', name: 'PRIVATE_LIBRARY_NAME_2' }];
 const sectionTemplate = [
@@ -50,6 +50,37 @@ test('default English protocol keeps TTSVoice and all four initial vocal events'
     for (const event of ['[笑]', '[叹气]', '[咳嗽]', '[清嗓子]']) assert.ok(text.includes(event), event);
     assert.match(text, /New/);
     assert.doesNotMatch(text, /\{\{(?:primary_character_note|bound_characters_section|skipped_characters_section|unbound_characters_section|vocal_events|vocal_event_example)\}\}/);
+});
+
+test('experimental default uses one speech copy while retaining historic templates unchanged', () => {
+    const text = buildVoicePrompt(context(), settings(), voices);
+    assert.match(text, /spoken utterance ONLY ONCE/);
+    assert.match(text, /Do not repeat the same speech in ordinary quotation marks outside the tag/);
+    assert.match(text, /Keep narration, actions, and thoughts outside TTSVoice/);
+    assert.match(text, /no outer quotation marks, Markdown, or narration/);
+    assert.match(text, /penultimate and final utterances/);
+    assert.doesNotMatch(text, /MUST contain BOTH copies|Never output speech only inside a TTS tag/);
+    assert.equal(text.split('等一下。现在可以了。').length - 1, 1);
+    assert.ok(text.includes('周启明抬起手。\n[TTSVoice:周启明:happy:[笑]等一下。现在可以了。]\n他合上本子。'));
+    assert.match(STABLE_DEFAULT_TEMPLATE, /MUST contain BOTH copies/);
+    assert.match(STABLE_DEFAULT_TEMPLATE, /hiding all TTS tags must leave the story and every spoken line readable/);
+    assert.match(PREVIOUS_DEFAULT_TEMPLATE, /Immediately after EVERY eligible spoken paragraph/);
+    assert.match(LEGACY_DEFAULT_TEMPLATE, /Keep these Chinese tags unchanged/);
+});
+
+test('experimental protocol has five rules, unchanged exclusions and role lists, and an optional sixth rule', () => {
+    const ctx = context();
+    const text = buildVoicePrompt(ctx, settings(), voices);
+    assert.deepEqual([...text.matchAll(/^(\d+)\. /gm)].map(match => Number(match[1])), [1, 2, 3, 4, 5]);
+    assert.match(text, /Do not tag "包子"'s speech, unspoken quotations, text messages, or content in <w2g>, <catsay>, summaries, and status panels/);
+    assert.match(text, /Bound characters[^\n]*\n  - "周启明"/);
+    assert.match(text, /Skipped characters[^\n]*\n  - "包子" \(the user\)/);
+    assert.match(text, /New \/ unbound characters[^\n]*\n  - "林知夏"\n  - "沈予安"/);
+    assert.doesNotMatch(text, /PRIVATE_LIBRARY_NAME|无关角色/);
+    Object.assign(ctx.chatMetadata[KEY], { extraPromptEnabled: true, extraPrompt: 'Keep campus voices quiet.' });
+    const extended = buildVoicePrompt(ctx, settings(), voices);
+    assert.deepEqual([...extended.matchAll(/^(\d+)\. /gm)].map(match => Number(match[1])), [1, 2, 3, 4, 5, 6]);
+    assert.equal(extended, `${text}\n\n6. Additional scene guidance (current chat):\nKeep campus voices quiet.`);
 });
 
 test('vocal events accept lines or common separators, normalize brackets and deduplicate', () => {

@@ -1,6 +1,7 @@
 /* Only message bubbles live in the host page. Studio styles are isolated. */
 .breeze-inline { display: inline; }
 .breeze-original[hidden] { display: none !important; }
+.breeze-dialogue { white-space: pre-wrap; overflow-wrap: anywhere; color: inherit; font: inherit; }
 .breeze-bubble { display: inline-flex; align-items: center; border: 0; border-radius: 18px; padding: 4px 11px; margin: 3px 6px; color: #243d2b; background: #d9eac0; cursor: pointer; font-size: .82rem; font-family: inherit; max-width: 100%; }
 .breeze-bubble[data-state=unmapped] { background: #c5c8c2; color: #484d44; }
 .breeze-bubble[data-state=error] { background: #f0c4b5; color: #732918; }
@@ -9,4 +10,5 @@
 .breeze-tray .menu_button { display: inline-block; }
 .breeze-fallback { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .breeze-fallback span { opacity: .7; }
+.breeze-fallback .breeze-dialogue { opacity: 1; }
 .breeze-warning { color: #e7b786; }

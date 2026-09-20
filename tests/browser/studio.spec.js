@@ -50,7 +50,7 @@ test('wand menu opens isolated studio; navigation, persistence, escape and reope
     await panel(page).locator('[data-prompt-template]').fill(template);
     await panel(page).locator('[data-save-prompt]').click();
     await expect.poll(() => panel(page).locator('[data-prompt-preview]').inputValue()).toContain('周启明');
-    expect(await page.evaluate(() => window.__breezeDemo.context.extensionSettings.breeze_voice.promptTemplate)).toBe(template);
+    expect(await page.evaluate(() => window.__breezeDemo.context.extensionSettings.breeze_voice.tagRenderPromptTemplate)).toBe(template);
 
     await page.keyboard.press('Escape');
     await expect(panel(page)).not.toBeVisible();

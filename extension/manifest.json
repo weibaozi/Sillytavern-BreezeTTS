@@ -1,10 +1,10 @@
 {
-  "display_name": "Breeze 角色语音",
+  "display_name": "Breeze 角色语音 · 单份对白实验版",
   "loading_order": 30,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "Local development",
-  "version": "0.6.1"
+  "version": "0.7.0-tag-render.1"
 }

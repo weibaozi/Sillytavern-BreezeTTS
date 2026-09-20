@@ -23,6 +23,17 @@ test('malformed tag does not swallow the next valid one; empty and multiline ski
 test('unknown vocal event is not hard-coded away', () => {
     assert.equal(parseTTS('[TTSVoice:A:自然:[轻笑]你好[喘息]]').segments[0].text, '[轻笑]你好[喘息]');
 });
+
+test('inline Markdown code is excluded with offsets preserved, including matching multi-backtick delimiters', () => {
+    const tag = '[TTSVoice:A:自然:你好]';
+    const raw = `\`${tag}\`\n\`\`example \` ${tag}\`\`\n${tag}`;
+    const segments = parseTTS(raw).segments;
+    assert.equal(segments.length, 1);
+    assert.equal(segments[0].start, raw.lastIndexOf(tag));
+    assert.equal(raw.slice(segments[0].start, segments[0].end), tag);
+    assert.equal(parseTTS(`\`unclosed ${tag}`).segments.length, 1);
+    assert.equal(parseTTS(`\\\`${tag}\\\``).segments.length, 1, 'escaped backticks are ordinary prose');
+});
 test('speaker discovery: card, group, tagged NPC, manual; no user or system roles', () => {
     const ctx = { name1: '包子', characterId: 0, characters: [{ name: '周启明', avatar: 'a.png' }, { name: '林知夏', avatar: 'b.png' }],
         chat: [{ mes: '[TTSVoice:沈予安:自然:你好]' }, { mes: '[TTSVoice:包子:自然:好]' }, { is_user: true, mes: '[TTSVoice:假角色:自然:好]' }, { is_system: true, mes: '[TTSVoice:系统角色:自然:好]' }] };

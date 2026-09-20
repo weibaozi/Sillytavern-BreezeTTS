@@ -9,6 +9,23 @@ function excludedText(raw) {
     // Keep character offsets intact so rendered tags can be matched to raw messages.
     const blank = s => s.replace(/[^\r\n]/g, ' ');
     let text = raw.replace(/```[^]*?(?:```|$)|~~~[^]*?(?:~~~|$)/g, blank);
+    // Inline Markdown code can contain literal tags too. Match equal-length
+    // backtick runs and retain offsets, just like fenced and HTML code below.
+    const backticks = /`+/g;
+    let opener;
+    while ((opener = backticks.exec(text))) {
+        let escapes = 0, before = opener.index;
+        while (before > 0 && text[--before] === '\\') escapes++;
+        if (escapes % 2) continue;
+        const closers = /`+/g;
+        closers.lastIndex = backticks.lastIndex;
+        let closer;
+        while ((closer = closers.exec(text)) && closer[0].length !== opener[0].length) {}
+        if (!closer) continue;
+        const end = closers.lastIndex;
+        text = text.slice(0, opener.index) + blank(text.slice(opener.index, end)) + text.slice(end);
+        backticks.lastIndex = end;
+    }
     const end = text.indexOf('<!-- 3.正文后的格式 -->');
     if (end >= 0) text = text.slice(0, end) + blank(text.slice(end));
     const token = /<!--[^]*?(?:-->|$)|<\/?(w2g|catsay|details|summary|think|thinking|analysis|status|options|script|style|pre|code)\b[^>]*>/gi;

@@ -40,7 +40,7 @@ export const PREVIOUS_DEFAULT_TEMPLATE = LEGACY_DEFAULT_TEMPLATE
     .replace('周启明笑出了声。', '周启明抬起手。')
     .replace('[TTSVoice:周启明:happy:[笑]等一下。现在可以了。]', '[TTSVoice:周启明:happy:{{vocal_event_example}}等一下。现在可以了。]');
 
-export const DEFAULT_TEMPLATE = PREVIOUS_DEFAULT_TEMPLATE
+export const STABLE_DEFAULT_TEMPLATE = PREVIOUS_DEFAULT_TEMPLATE
     .replace('2. Immediately after EVERY eligible spoken paragraph, add one separate plain-text line:',
         '2. Every eligible spoken paragraph MUST contain BOTH copies, in this order: first write the full dialogue in ordinary quotation marks within the story; immediately below that paragraph, repeat its spoken words as one separate plain-text line:')
     .replace('Copy ALL spoken words in that paragraph in order, preserving wording and punctuation.',
@@ -49,6 +49,34 @@ export const DEFAULT_TEMPLATE = PREVIOUS_DEFAULT_TEMPLATE
         'In the TTS copy only, remove surrounding quotes, Markdown, and narration; preserve them in the readable story.')
     .replace('Each needs its own adjacent, complete tag. Fix omissions at their original positions;',
         'Each needs BOTH readable quoted dialogue and its adjacent, complete tag. Also check every TTS tag has its full dialogue in the paragraph above it: hiding all TTS tags must leave the story and every spoken line readable. Restore missing quoted speech above its tag. Fix omissions at their original positions;');
+
+export const DEFAULT_TEMPLATE = `[Voice Synthesis & Dialogue Protocol]
+Preserve the existing prose style, output language, and all unrelated preset requirements.
+{{primary_character_note}}
+
+1. Write each eligible spoken utterance ONLY ONCE, inside one separate plain-text line:
+[TTSVoice:Character_Name:emotion:Spoken dialogue]
+The plugin displays its dialogue as readable quoted speech. Do not repeat the same speech in ordinary quotation marks outside the tag. Keep natural novel-style narration around it; no "Name:" prefix is required.
+
+2. Keep narration, actions, and thoughts outside TTSVoice. Do not tag {{user}}'s speech, unspoken quotations, text messages, or content in <w2g>, <catsay>, summaries, and status panels. Skipped speech remains ordinary prose. Tags belong inside the story body; tag delimiters, speaker names, and emotion fields are metadata, not prose. Keep every other format module and its order unchanged.
+
+3. Use one exact, consistent character name in every tag, never pronouns or changing nicknames. Voice-profile names never replace character names.
+- Bound characters (use a short, natural emotion description; default for neutral delivery):
+{{bound_characters_section}}
+- Skipped characters (ordinary prose only; no TTS tag):
+{{skipped_characters_section}}
+- New / unbound characters: use emotion New, including these known unbound characters:
+{{unbound_characters_section}}
+Emotion should follow the scene naturally, without abrupt extremes.
+
+4. Inside spoken dialogue, optionally add only these allowed audible events at the intended position: {{vocal_events}}. Keep event tags unchanged; if none are allowed, add no vocal-event tags. Use them sparingly; a smile alone is not audible laughter. No silent actions.
+
+5. Use the exact prefix TTSVoice. Names and emotions contain no colons, square brackets, or line breaks. Inside the dialogue field, write only spoken words and allowed audible events: no outer quotation marks, Markdown, or narration. Preserve normal punctuation. Close every inner event bracket before the outer TTSVoice bracket; each complete tag occupies one line, without bold or code fences. Complete each utterance's tag before continuing. Short replies, consecutive remarks, questions, and closing lines all follow this rule. Before any post-body module, silently check all eligible speech, especially the penultimate and final utterances; fix missing tags in place without adding duplicate dialogue or printing the check.
+
+Example (a bound speaker):
+周启明抬起手。
+[TTSVoice:周启明:happy:{{vocal_event_example}}等一下。现在可以了。]
+他合上本子。`;
 
 export const PROMPT_DEFAULTS = Object.freeze({
     injectPrompt: true, promptDepth: 1, promptTemplate: DEFAULT_TEMPLATE, vocalEvents: DEFAULT_VOCAL_EVENTS,

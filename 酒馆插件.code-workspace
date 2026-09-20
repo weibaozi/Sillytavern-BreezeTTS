@@ -1,4 +1,4 @@
 {
-  "folders": [{ "name": "SillyTavern Breeze plugin", "path": "." }],
+  "folders": [{ "name": "Breeze · 单份对白实验分支", "path": "." }],
   "settings": { "search.exclude": { "node_modules/**": true, "references/**": true, "experiments/**": true } }
 }

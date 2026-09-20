@@ -1,8 +1,9 @@
 import { KEY, DEFAULTS, parseTTS, chatKey, discoverSpeakers, mappedVoice, requestFor, cacheKey, normalizeBase } from './core.js';
 import { BreezeClient, checkAbort } from './client.js';
 import { SpeechPlayer } from './player.js';
-import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, LEGACY_DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
+import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
 import { listExtraPresets, createExtraPreset, updateExtraPreset, deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from './extra-prompts.js';
+import { displayDialogue, hasLegacyDialogue } from './dialogue-render.js';
 import { createStudioPanel } from './panel.js';
 import { mountStudioEntry } from './menu.js';
 
@@ -24,7 +25,14 @@ function meta(create = false) {
     return { mappings: data.mappings || {}, manual: data.manual || [], cache: data.cache || {}, ...data };
 }
 function saveMeta() { return Promise.resolve(context().saveMetadata()).catch(error => notice(error.message)); }
-function saveSettings() { context().extensionSettings[KEY] = settings; context().saveSettingsDebounced(); }
+function saveSettings() {
+    const ctx = context(), saved = ctx.extensionSettings[KEY] || {};
+    // Experimental edits use their own field so returning to stable keeps its template.
+    ctx.extensionSettings[KEY] = { ...settings,
+        promptTemplate: typeof saved.promptTemplate === 'string' ? saved.promptTemplate : STABLE_DEFAULT_TEMPLATE,
+        tagRenderPromptTemplate: settings.promptTemplate };
+    ctx.saveSettingsDebounced();
+}
 function notice(message) { const node = dialog?.querySelector('[data-status]'); if (node) node.textContent = message; }
 function studioText(selector, value) { dialog?.querySelectorAll(selector).forEach(node => { node.textContent = value; }); }
 function refreshStudioSummary() {
@@ -267,7 +275,11 @@ function insertBubbles(container, messageItems) {
         range.setStart(first.node, start - first.start); range.setEnd(last.node, end - last.start);
         const wrapper = el('span', null, 'breeze-inline');
         const original = el('span', item.segment.raw, 'breeze-original'); original.hidden = settings.hideTags;
-        wrapper.append(original, bubble(item)); range.deleteContents(); range.insertNode(wrapper);
+        wrapper.append(original);
+        if (settings.hideTags && !item.legacyDialogue && item.displayText) {
+            wrapper.append(el('span', `“${item.displayText}”`, 'breeze-dialogue'));
+        }
+        wrapper.append(bubble(item)); range.deleteContents(); range.insertNode(wrapper);
     }
     const tray = el('div', null, 'breeze-tray');
     const all = el('button', '▶ 播放本条', 'menu_button'); all.type = 'button';
@@ -280,7 +292,12 @@ function insertBubbles(container, messageItems) {
     });
     tray.append(all);
     for (const item of fallback) {
-        const row = el('div', null, 'breeze-fallback'); row.append(bubble(item), el('span', item.segment.text.slice(0, 90))); tray.append(row);
+        const row = el('div', null, 'breeze-fallback');
+        if (!settings.hideTags) row.append(el('span', item.segment.raw, 'breeze-original'));
+        else if (item.displayText && !item.legacyDialogue) {
+            row.append(el('span', `“${item.displayText}”`, 'breeze-dialogue'));
+        }
+        row.append(bubble(item)); tray.append(row);
     }
     body.after(tray);
 }
@@ -292,11 +309,13 @@ function render() {
         const messageId = Number(container.getAttribute('mesid')), msg = ctx.chat[messageId];
         if (!msg || msg.is_user || msg.is_system) continue;
         const { segments, diagnostics } = parseTTS(msg.mes, ctx.name1);
-        const entries = segments.map(segment => {
+        const entries = segments.map((segment, index) => {
             const id = JSON.stringify([key, messageId, msg.swipe_id ?? 0, msg.mes, segment.ordinal]);
             const previous = items.get(id);
             const item = previous?.epoch === epoch ? previous : { id, chat: key, messageId, rawMessage: msg.mes,
                 swipe: msg.swipe_id ?? 0, segment, epoch, state: 'idle' };
+            item.displayText = displayDialogue(segment.text, settings.vocalEvents);
+            item.legacyDialogue = hasLegacyDialogue(msg.mes, segment, index ? segments[index - 1].end : 0, settings.vocalEvents);
             if (!mappedVoice(meta().mappings, segment.speaker, voices)) item.state = 'unmapped';
             else if (item.state === 'unmapped') item.state = 'idle';
             next.set(id, item); return item;
@@ -437,10 +456,10 @@ function buildPanel() {
     const eventsInput = dialog.querySelector('[data-vocal-events]');
     eventsInput.value = settings.vocalEvents;
     eventsInput.addEventListener('input', () => {
-        settings.vocalEvents = eventsInput.value; saveSettings(); refreshPrompt();
+        settings.vocalEvents = eventsInput.value; saveSettings(); refreshPrompt(); scheduleRender();
     });
     dialog.querySelector('[data-reset-vocal-events]').onclick = () => {
-        settings.vocalEvents = DEFAULT_VOCAL_EVENTS; saveSettings(); refreshPrompt();
+        settings.vocalEvents = DEFAULT_VOCAL_EVENTS; saveSettings(); refreshPrompt(); scheduleRender();
     };
     const extraInput = dialog.querySelector('[data-extra-prompt]');
     const extraToggle = dialog.querySelector('[data-extra-prompt-enabled]');
@@ -651,10 +670,9 @@ function scheduleAutomatic() {
 function init() {
     const ctx = context();
     settings = { ...DEFAULTS, ...PROMPT_DEFAULTS, ...ctx.extensionSettings[KEY] };
-    // Upgrade only our unchanged old default; users' edited templates remain intact.
-    if ([LEGACY_DEFAULT_TEMPLATE, PREVIOUS_DEFAULT_TEMPLATE].includes(settings.promptTemplate)) {
-        settings.promptTemplate = DEFAULT_TEMPLATE; saveSettings();
-    }
+    settings.promptTemplate = typeof settings.tagRenderPromptTemplate === 'string' ? settings.tagRenderPromptTemplate : DEFAULT_TEMPLATE;
+    // The stable template is retained verbatim; only this branch's field is initialized.
+    if (typeof settings.tagRenderPromptTemplate !== 'string') saveSettings();
     if (typeof settings.vocalEvents !== 'string') settings.vocalEvents = DEFAULT_VOCAL_EVENTS;
     try { client = new BreezeClient(settings.baseUrl); } catch { settings.baseUrl = DEFAULTS.baseUrl; client = new BreezeClient(settings.baseUrl); }
     buildPanel();

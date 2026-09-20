@@ -46,7 +46,8 @@ test('actual extension binds current-chat voices, creates safe bubbles, hides on
     const tick = () => new Promise(r => setTimeout(r, 180));
     await import('../extension/index.js'); await tick();
     const panel = document.querySelector('#breeze-studio-host').shadowRoot;
-    assert.equal(ctx.extensionSettings.breeze_voice.promptTemplate, DEFAULT_TEMPLATE, 'unchanged old default migrates to dynamic vocal example');
+    assert.equal(ctx.extensionSettings.breeze_voice.promptTemplate, LEGACY_DEFAULT_TEMPLATE, 'stable template remains unchanged for rollback');
+    assert.equal(ctx.extensionSettings.breeze_voice.tagRenderPromptTemplate, DEFAULT_TEMPLATE, 'experiment uses its own single-copy template');
     assert.equal(panel.querySelector('[data-vocal-events]').value, DEFAULT_VOCAL_EVENTS);
     assert.equal(panel.querySelector('[data-extra-prompt]').value, '');
     assert.equal(panel.querySelector('[data-extra-prompt-enabled]').checked, false);
@@ -76,7 +77,8 @@ test('actual extension binds current-chat voices, creates safe bubbles, hides on
     assert.ok(ctx.extensionPrompts[PROMPT_KEY].value.includes('New:\n  - "林知夏"'));
     assert.ok(ctx.extensionPrompts[PROMPT_KEY].value.includes('[笑]'));
     assert.equal(panel.querySelector('[data-prompt-preview]').value, ctx.extensionPrompts[PROMPT_KEY].value);
-    assert.equal(ctx.extensionSettings.breeze_voice.promptTemplate, template.value);
+    assert.equal(ctx.extensionSettings.breeze_voice.tagRenderPromptTemplate, template.value);
+    assert.equal(ctx.extensionSettings.breeze_voice.promptTemplate, LEGACY_DEFAULT_TEMPLATE);
     const injection = panel.querySelector('[data-setting="injectPrompt"]');
     injection.checked = false; injection.dispatchEvent(new window.Event('change'));
     assert.equal(ctx.extensionPrompts[PROMPT_KEY].value, '');

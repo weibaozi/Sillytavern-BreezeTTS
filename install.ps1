@@ -1,9 +1,13 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$SillyTavernPath = 'G:\study\AI\SillyTavern-Launcher\SillyTavern',
-    [string]$UserHandle = 'default-user'
+    [string]$UserHandle = 'default-user',
+    [switch]$InstallExperimental
 )
 $ErrorActionPreference = 'Stop'
+if (-not $InstallExperimental) {
+    throw 'This is the experimental TTSVoice single-copy branch. To replace the installed plugin with a backup, explicitly pass -InstallExperimental. The stable source is unchanged.'
+}
 if ($UserHandle -notmatch '^[a-zA-Z0-9_-]+$') { throw 'Invalid user handle.' }
 $stRoot = (Resolve-Path -LiteralPath $SillyTavernPath).Path
 if (-not (Test-Path -LiteralPath (Join-Path $stRoot 'public\scripts\st-context.js'))) {
