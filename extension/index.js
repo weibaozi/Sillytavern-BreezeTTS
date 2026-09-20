@@ -1,6 +1,7 @@
-import { KEY, DEFAULTS, parseTTS, chatKey, discoverSpeakers, mappedVoice, requestFor, cacheKey, normalizeBase } from './core.js';
+import { KEY, DEFAULTS, parseTTS, parseStreamingTTS, chatKey, discoverSpeakers, mappedVoice, requestFor, cacheKey, normalizeBase } from './core.js';
 import { BreezeClient, checkAbort } from './client.js';
 import { SpeechPlayer } from './player.js';
+import { AutomaticSpeechQueue } from './automatic-queue.js';
 import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
 import { listExtraPresets, createExtraPreset, updateExtraPreset, deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from './extra-prompts.js';
 import { displayDialogue, hasLegacyDialogue } from './dialogue-render.js';
@@ -13,6 +14,8 @@ let settings, client, voices = [], studio, dialog, generation = false, epoch = 0
 let items = new Map(), autoPending = new Set(), consumed = new Set(), designController;
 let connectionVersion = 0;
 let automaticTimer, allowAutomatic = false;
+let chatObserver, observedChat, rendering = false, generationType = null, continueCutoff = 0, continueMessageId = null;
+const liveMessageIds = new Set();
 let injectionType = null;
 let serviceState = 'offline', supportsStreaming = false, previewAudio, previewButton;
 const memory = new Map();
@@ -141,7 +144,7 @@ function refreshPrompt() {
 function valid(item) {
     const ctx = context(), msg = ctx.chat[item.messageId];
     return item.epoch === epoch && chatKey(ctx) === item.chat && msg && !msg.is_user && !msg.is_system &&
-        msg.mes === item.rawMessage && (msg.swipe_id ?? 0) === item.swipe;
+        String(msg.mes).slice(0, item.segment.end) === item.rawMessage.slice(0, item.segment.end) && (msg.swipe_id ?? 0) === item.swipe;
 }
 function update(item, state, error = '', duration) {
     if (!valid(item)) return;
@@ -209,18 +212,21 @@ async function prepare(item, signal, { stream = false } = {}) {
     return cacheResult(record);
 }
 const player = new SpeechPlayer({ prepare, update });
+const automaticQueue = new AutomaticSpeechQueue({ player, isValid: valid,
+    onError: error => { allowAutomatic = false; autoPending.clear(); stopPlayback(); if (error.name !== 'AbortError') notice(error.message); } });
 function stopPlayback() {
-    player.stop();
+    automaticQueue.stop();
     for (const item of items.values()) if (['playing', 'paused', 'queued', 'running'].includes(item.state)) update(item, 'idle');
 }
 function invalidate() {
     stopPlayback(); stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
     epoch++; autoPending.clear(); allowAutomatic = false;
-    clearTimeout(automaticTimer); designController?.abort(); scheduleRender();
+    clearTimeout(automaticTimer); automaticTimer = null; designController?.abort(); scheduleRender();
 }
 async function play(item) {
     if (!settings.enabled) return;
     if (!mappedVoice(meta().mappings, item.segment.speaker, voices)) { openPanel('characters'); return; }
+    if (automaticQueue.busy && player.current?.id !== item.id) { stopPlayback(); allowAutomatic = false; autoPending.clear(); }
     stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
     player.volume = Number(settings.volume);
     try { await player.toggle(item, { stream: settings.streaming }); }
@@ -256,12 +262,14 @@ function textMap(root) {
     }
     return { text, nodes };
 }
-function insertBubbles(container, messageItems) {
+function insertBubbles(container, messageItems, pending = []) {
     const body = container.querySelector('.mes_text'); if (!body) return;
     const map = textMap(body); let cursor = 0;
     const replacements = [], fallback = [];
-    for (const item of messageItems) {
-        const start = map.text.indexOf(item.segment.raw, cursor);
+    const displayItems = [...messageItems, ...pending.map(segment => ({ segment, pending: true,
+        displayText: displayDialogue(segment.text || '', settings.vocalEvents) }))].sort((a, b) => a.segment.start - b.segment.start);
+    for (const item of displayItems) {
+        const start = item.pending ? map.text.lastIndexOf(item.segment.raw) : map.text.indexOf(item.segment.raw, cursor);
         if (start < 0) { fallback.push(item); continue; }
         const end = start + item.segment.raw.length;
         const first = map.nodes.find(n => n.start <= start && n.end > start);
@@ -273,46 +281,72 @@ function insertBubbles(container, messageItems) {
     for (const { item, start, end, first, last } of replacements.reverse()) {
         const range = document.createRange();
         range.setStart(first.node, start - first.start); range.setEnd(last.node, end - last.start);
-        const wrapper = el('span', null, 'breeze-inline');
+        const wrapper = el('span', null, item.pending ? 'breeze-inline breeze-pending' : 'breeze-inline');
         const original = el('span', item.segment.raw, 'breeze-original'); original.hidden = settings.hideTags;
         wrapper.append(original);
         if (settings.hideTags && !item.legacyDialogue && item.displayText) {
-            wrapper.append(el('span', `“${item.displayText}”`, 'breeze-dialogue'));
+            wrapper.append(el('q', `“${item.displayText}${item.pending ? '' : '”'}`, 'breeze-dialogue'));
         }
-        wrapper.append(bubble(item)); range.deleteContents(); range.insertNode(wrapper);
+        if (!item.pending) wrapper.append(bubble(item));
+        range.deleteContents(); range.insertNode(wrapper);
     }
     const tray = el('div', null, 'breeze-tray');
     const all = el('button', '▶ 播放本条', 'menu_button'); all.type = 'button';
     all.addEventListener('click', () => {
         const eligible = messageItems.filter(i => mappedVoice(meta().mappings, i.segment.speaker, voices));
         if (!eligible.length) return openPanel('characters');
+        stopPlayback(); allowAutomatic = false; autoPending.clear();
         player.volume = Number(settings.volume);
         stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
         void player.run(eligible, { stream: settings.streaming }).catch(e => { if (e.name !== 'AbortError') notice(e.message); });
     });
-    tray.append(all);
+    if (messageItems.length) tray.append(all);
     for (const item of fallback) {
         const row = el('div', null, 'breeze-fallback');
         if (!settings.hideTags) row.append(el('span', item.segment.raw, 'breeze-original'));
         else if (item.displayText && !item.legacyDialogue) {
-            row.append(el('span', `“${item.displayText}”`, 'breeze-dialogue'));
+            row.append(el('q', `“${item.displayText}${item.pending ? '' : '”'}`, 'breeze-dialogue'));
         }
-        row.append(bubble(item)); tray.append(row);
+        if (!item.pending) row.append(bubble(item));
+        tray.append(row);
     }
-    body.after(tray);
+    if (tray.childNodes.length) body.after(tray);
 }
-function render() {
-    const ctx = context(), key = chatKey(ctx), next = new Map();
+function render(onlyMessageId = null) {
+    if (rendering) return;
+    rendering = true; chatObserver?.disconnect();
+    try { renderMessages(onlyMessageId); }
+    finally {
+        rendering = false;
+        if (observedChat) chatObserver?.observe(observedChat, { childList: true, subtree: true, characterData: true });
+    }
+}
+function renderMessages(onlyMessageId) {
+    const ctx = context(), key = chatKey(ctx), next = onlyMessageId == null ? new Map() : new Map(items);
+    if (onlyMessageId != null) for (const [id, item] of next) if (item.messageId === onlyMessageId) next.delete(id);
     for (const container of document.querySelectorAll('#chat .mes[mesid]')) {
+        const messageId = Number(container.getAttribute('mesid'));
+        if (onlyMessageId != null && messageId !== onlyMessageId) continue;
+        if (!settings.enabled || !key) { restoreMessage(container); continue; }
+        const msg = ctx.chat[messageId];
+        if (!msg || msg.is_user || msg.is_system) { restoreMessage(container); continue; }
+        const live = generation && liveMessageIds.has(messageId);
+        const { segments, diagnostics, pending = [] } = live ? parseStreamingTTS(msg.mes, ctx.name1) : parseTTS(msg.mes, ctx.name1);
+        const body = container.querySelector('.mes_text');
+        // ST updates chat.mes before awaiting reasoning and redrawing the DOM.
+        // Keep the previous safe presentation until the newer tag reaches it.
+        if (live && body?.querySelector('.breeze-inline')) {
+            const visibleSource = textMap(body).text;
+            if ([...segments, ...pending].some(segment => !visibleSource.includes(segment.raw))) {
+                for (const [id, item] of items) if (item.messageId === messageId) next.set(id, item);
+                continue;
+            }
+        }
         restoreMessage(container);
-        if (!settings.enabled || !key) continue;
-        const messageId = Number(container.getAttribute('mesid')), msg = ctx.chat[messageId];
-        if (!msg || msg.is_user || msg.is_system) continue;
-        const { segments, diagnostics } = parseTTS(msg.mes, ctx.name1);
         const entries = segments.map((segment, index) => {
-            const id = JSON.stringify([key, messageId, msg.swipe_id ?? 0, msg.mes, segment.ordinal]);
+            const id = JSON.stringify([key, messageId, msg.swipe_id ?? 0, epoch, segment.start, segment.raw]);
             const previous = items.get(id);
-            const item = previous?.epoch === epoch ? previous : { id, chat: key, messageId, rawMessage: msg.mes,
+            const item = previous?.epoch === epoch && valid(previous) ? previous : { id, chat: key, messageId, rawMessage: msg.mes,
                 swipe: msg.swipe_id ?? 0, segment, epoch, state: 'idle' };
             item.displayText = displayDialogue(segment.text, settings.vocalEvents);
             item.legacyDialogue = hasLegacyDialogue(msg.mes, segment, index ? segments[index - 1].end : 0, settings.vocalEvents);
@@ -320,20 +354,24 @@ function render() {
             else if (item.state === 'unmapped') item.state = 'idle';
             next.set(id, item); return item;
         });
-        if (entries.length) insertBubbles(container, entries);
+        if (entries.length || pending.length) insertBubbles(container, entries, pending);
         if (diagnostics.length) {
             const note = el('div', `Breeze：${diagnostics.length} 个标签格式异常，已跳过。`, 'breeze-tray breeze-warning');
             container.querySelector('.mes_text')?.after(note);
         }
     }
     items = next;
+    if (automaticQueue.activeItems.some(item => !valid(item)) || (player.current && !valid(player.current))) stopPlayback();
     for (const item of items.values()) update(item, item.state, item.error, item.duration);
-    refreshStudioSummary();
-    if (dialog?.open) renderCharacters();
+    if (onlyMessageId == null || !generation) {
+        refreshStudioSummary();
+        if (dialog?.open) renderCharacters();
+    }
+    if (generation && settings.readStreamingText && allowAutomatic) scheduleAutomatic();
 }
 function scheduleRender() {
-    clearTimeout(renderTimer);
-    renderTimer = setTimeout(() => { if (!generation) render(); }, 100);
+    if (renderTimer != null) return;
+    renderTimer = setTimeout(() => { renderTimer = null; render(); }, generation ? 16 : 100);
 }
 async function refreshConnection() {
     const version = ++connectionVersion, api = client;
@@ -438,7 +476,7 @@ function buildPanel() {
         input.addEventListener('change', () => {
             if (!input.checkValidity()) { input.reportValidity(); input.value = settings[key]; return; }
             settings[key] = input.type === 'checkbox' ? input.checked : Number(input.value);
-            if (['enabled', 'cfgScale', 'seed', 'autoPlay', 'autoGenerate', 'streaming'].includes(key)) invalidate();
+            if (['enabled', 'cfgScale', 'seed', 'autoPlay', 'autoGenerate', 'streaming', 'readStreamingText'].includes(key)) invalidate();
             player.volume = settings.volume; if (player.audio) player.audio.volume = settings.volume;
             if (key === 'volume') {
                 if (previewAudio) previewAudio.volume = Number(settings.volume);
@@ -447,7 +485,7 @@ function buildPanel() {
             saveSettings();
             // Settings invalidate the old bubble callbacks; replace them before the
             // panel can close and the user immediately clicks a dialogue.
-            if (generation) scheduleRender(); else { clearTimeout(renderTimer); render(); }
+            if (generation) scheduleRender(); else { clearTimeout(renderTimer); renderTimer = null; render(); }
             refreshPrompt(); refreshStudioSummary();
         });
     }
@@ -643,29 +681,39 @@ function buildPanel() {
     };
 }
 
-async function automatic(ids) {
+function automatic(ids) {
     if (!settings.enabled || (!settings.autoGenerate && !settings.autoPlay)) return;
-    render(); const selected = [];
-    for (const item of items.values()) {
+    const selected = [];
+    for (const item of [...items.values()].sort((a, b) => a.messageId - b.messageId || a.segment.start - b.segment.start)) {
         if (!ids.has(item.messageId) || consumed.has(item.id)) continue;
+        if (generationType === 'continue' && item.messageId === continueMessageId && item.segment.end <= continueCutoff) continue;
         consumed.add(item.id);
-        if (mappedVoice(meta().mappings, item.segment.speaker, voices)) selected.push(item);
+        if (mappedVoice(meta().mappings, item.segment.speaker, voices) && valid(item)) { selected.push(item); update(item, 'queued'); }
     }
     if (consumed.size > 2000) consumed = new Set([...consumed].slice(-1000));
     if (!selected.length) return;
     player.volume = Number(settings.volume);
-    try { await player.run(selected, { play: settings.autoPlay, stream: settings.streaming }); }
-    catch (error) { if (error.name !== 'AbortError') notice(error.message); }
+    automaticQueue.enqueue(selected, { play: settings.autoPlay, stream: settings.streaming });
 }
 function scheduleAutomatic() {
-    clearTimeout(automaticTimer);
+    if (automaticTimer != null || !autoPending.size) return;
     const expectedEpoch = epoch;
     automaticTimer = setTimeout(() => {
-        if (epoch !== expectedEpoch || generation || !allowAutomatic) return;
+        automaticTimer = null;
+        if (epoch !== expectedEpoch || (generation && !settings.readStreamingText) || !allowAutomatic) return;
         // ST streaming can emit GENERATION_ENDED before MESSAGE_RECEIVED.
         const pending = new Set(autoPending); autoPending.clear();
-        scheduleRender(); void automatic(pending);
-    }, 120);
+        if (!generation) render();
+        automatic(pending);
+    }, generation ? 25 : 120);
+}
+function recordStreamingMessage() {
+    if (!generation || ['quiet', 'impersonate'].includes(generationType)) return null;
+    const ctx = context(), id = ctx.streamingProcessor?.messageId;
+    if (!Number.isInteger(id) || id < 0 || !ctx.chat[id] || ctx.chat[id].is_user || ctx.chat[id].is_system) return null;
+    liveMessageIds.add(id);
+    if (allowAutomatic) autoPending.add(id);
+    return id;
 }
 function init() {
     const ctx = context();
@@ -680,8 +728,16 @@ function init() {
     const on = (name, fn) => { if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name], fn); };
     on('GENERATION_STARTED', (_type, _options, dryRun) => {
         injectionType = _type; refreshPrompt();
-        if (!dryRun) { invalidate(); generation = true; allowAutomatic = true; }
+        if (!dryRun) {
+            invalidate(); liveMessageIds.clear(); generationType = _type;
+            continueCutoff = _type === 'continue' ? String(context().chat.at(-1)?.mes || '').length : 0;
+            continueMessageId = _type === 'continue' ? context().chat.length - 1 : null;
+            generation = !['quiet', 'impersonate'].includes(_type); allowAutomatic = generation;
+        }
     });
+    // This event precedes ST's throttled DOM update; the observer below handles
+    // the actual redraw before paint. Read chat.mes, never mutate the token text.
+    on('STREAM_TOKEN_RECEIVED', recordStreamingMessage);
     // After slash commands, before ST collects extension prompts; includes dry-run previews.
     on('GENERATION_AFTER_COMMANDS', type => { injectionType = type; refreshPrompt(); });
     on('MESSAGE_RECEIVED', (id, type) => {
@@ -691,6 +747,7 @@ function init() {
     });
     on('GENERATION_ENDED', () => {
         injectionType = null; refreshPrompt();
+        if (allowAutomatic) for (const id of liveMessageIds) autoPending.add(id);
         generation = false; scheduleRender(); scheduleAutomatic();
     });
     on('GENERATION_STOPPED', () => { generation = false; invalidate(); injectionType = null; refreshPrompt(); });
@@ -701,11 +758,26 @@ function init() {
         on(name, () => { scheduleRender(); refreshPrompt(); });
     }
     for (const name of ['PRESET_CHANGED', 'OAI_PRESET_CHANGED_AFTER']) on(name, refreshPrompt);
-    // Only observe host message nodes, never our own bubbles. ST rerenders may occur after events.
-    const chat = document.querySelector('#chat');
-    if (chat) new MutationObserver(changes => {
-        if (changes.some(c => [...c.addedNodes].some(n => n.nodeType === 1 && (n.matches?.('.mes,.mes_text') || n.querySelector?.('.mes_text'))))) scheduleRender();
-    }).observe(chat, { childList: true, subtree: true });
+    // Host streaming replaces descendants of .mes_text, not the element itself.
+    // Disconnect around our own render so wrappers never feed back into this observer.
+    observedChat = document.querySelector('#chat');
+    if (observedChat) {
+        chatObserver = new MutationObserver(changes => {
+            const affected = new Set(); let hostChange = false;
+            for (const change of changes) {
+                const target = change.target.nodeType === 1 ? change.target : change.target.parentElement;
+                if (target?.closest('.breeze-inline,.breeze-tray')) continue;
+                const body = target?.closest('.mes_text');
+                if (body) { affected.add(Number(body.closest('.mes')?.getAttribute('mesid'))); hostChange = true; }
+                else if ([...change.addedNodes].some(node => node.nodeType === 1 && (node.matches?.('.mes,.mes_text') || node.querySelector?.('.mes_text')))) hostChange = true;
+            }
+            if (!hostChange) return;
+            const liveId = recordStreamingMessage();
+            if (liveId != null && affected.has(liveId)) render(liveId);
+            else scheduleRender();
+        });
+        chatObserver.observe(observedChat, { childList: true, subtree: true, characterData: true });
+    }
     scheduleRender(); refreshPrompt(); void refreshConnection();
 }
 let attempts = 0;

@@ -38,6 +38,7 @@ const html = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Breeze Studio · 交互预览</title>
 <link rel="stylesheet" href="/extension/style.css">
 <style>
+:root{--SmartThemeQuoteColor:rgb(225,138,36)}.mes_text q{color:var(--SmartThemeQuoteColor)}.mes q::before,.mes q::after{content:''}
 *{box-sizing:border-box}body{margin:0;background:#eeeae4;color:#363b37;font-family:system-ui,"Microsoft YaHei",sans-serif}button{font:inherit;cursor:pointer}.demo-shell{max-width:950px;margin:auto;padding:30px 24px}.demo-label{font-size:11px;letter-spacing:.15em;color:#6b756e;text-transform:uppercase}.demo-title{font-size:24px;margin:12px 0 6px}.demo-note{color:#747b72;font-size:13px;line-height:1.8}.demo-chat{padding:26px;border:1px solid #d7d9d0;border-radius:18px;background:#f8f8f3;margin-top:24px;line-height:1.8}.demo-chat h2{font-size:15px;color:#73796f}#send_form{display:flex;align-items:center;gap:12px;position:relative;margin-top:22px;border:1px solid #d4d8ce;background:#fffdf8;padding:12px;border-radius:14px}#send_form textarea{resize:none;flex:1;border:0;background:transparent;color:#72796e;font:inherit;min-width:0}#extensionsMenuButton{width:44px;height:44px;background:#e2eada;border:0;border-radius:10px;color:#466343;font-size:24px}#extensionsMenu{position:absolute;left:0;bottom:76px;width:248px;padding:8px;border:1px solid #d6dbd0;border-radius:12px;background:#fafbf5;box-shadow:0 14px 50px #17331b22;z-index:100}#extensionsMenu [hidden]{display:none}#extensionsMenu button,.list-group-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px;border:0;background:transparent;color:#555e52;text-align:left;font-size:14px;border-radius:7px}#extensionsMenu button:hover,.list-group-item:hover{background:#e7eddc}.demo-tag{font-size:11px;border:1px solid #cfdbc6;padding:2px 7px;border-radius:5px}.mes_text{white-space:pre-wrap}.demo-footer{margin-top:20px;font-size:12px;color:#7b8276}@media(max-width:500px){.demo-shell{padding:22px 14px}.demo-chat{padding:20px}}
 </style></head><body><main class="demo-shell"><div class="demo-label">BREEZE STUDIO / LOCAL PREVIEW</div><h1 class="demo-title">交互预览 · 演示数据</h1><p class="demo-note">从左下方魔法棒菜单打开 Breeze 语音工作室。这里使用独立的模拟聊天与音色；不会连接酒馆或真实模型。试听为短测试音。</p><section class="demo-chat"><h2>青禾大学 · 课程作业小组 <span class="demo-tag">演示聊天</span></h2><div id="chat"><div class="mes" mesid="0"><div class="mes_text"></div></div></div></section><form id="send_form"><button id="extensionsMenuButton" type="button" aria-label="打开扩展菜单" aria-expanded="false">✧</button><textarea aria-label="演示聊天输入框" readonly rows="1">从这里开始管理角色声音…</textarea><div id="extensionsMenu" role="menu" hidden><button type="button" role="menuitem" disabled>翻译聊天（演示占位）</button><button type="button" role="menuitem" disabled>变量管理器（演示占位）</button></div></form><div id="extensions_settings" hidden></div><p class="demo-footer">设置仅保存在当前浏览器标签页的演示会话中；不会修改真实酒馆配置。</p></main>
 <script>
@@ -52,7 +53,7 @@ function persistDemo() {
     chatStates[context.chatId] = context.chatMetadata;
     sessionStorage.setItem(storageKey, JSON.stringify({ settings: context.extensionSettings, chats: chatStates }));
 }
-const events = ['GENERATION_STARTED','GENERATION_AFTER_COMMANDS','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_RECEIVED','CHAT_CHANGED','CHAT_LOADED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_UPDATED','MESSAGE_DELETED','MESSAGE_SWIPE_DELETED','PERSONA_CHANGED','CHARACTER_MESSAGE_RENDERED','MORE_MESSAGES_LOADED','GROUP_UPDATED','PRESET_CHANGED','OAI_PRESET_CHANGED_AFTER'];
+const events = ['GENERATION_STARTED','GENERATION_AFTER_COMMANDS','GENERATION_ENDED','GENERATION_STOPPED','STREAM_TOKEN_RECEIVED','MESSAGE_RECEIVED','CHAT_CHANGED','CHAT_LOADED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_UPDATED','MESSAGE_DELETED','MESSAGE_SWIPE_DELETED','PERSONA_CHANGED','CHARACTER_MESSAGE_RENDERED','MORE_MESSAGES_LOADED','GROUP_UPDATED','PRESET_CHANGED','OAI_PRESET_CHANGED_AFTER'];
 const context = {name1:'演示用户', characterId:0, groupId:'demo-campus', groups:[{id:'demo-campus',name:'青禾大学 · 演示聊天',members:['demo-zhou.png','demo-lin.png','demo-shen.png']}], chatId:'demo-campus-chat', characters:[{name:'周启明',avatar:'demo-zhou.png'},{name:'林知夏',avatar:'demo-lin.png'},{name:'沈予安',avatar:'demo-shen.png'}], chat:[{mes:raw,swipe_id:0}], chatMetadata:{breeze_voice:{mappings:{'周启明':'${ids[0]}','林知夏':'${ids[1]}'},manual:[],cache:{},demo:true}},extensionSettings:{breeze_voice:{baseUrl:location.origin,autoGenerate:false,autoPlay:false}},extensionPrompts:{},eventTypes:Object.fromEntries(events.map(e=>[e,e])),eventSource:{on(e,fn){if(!handlers.has(e))handlers.set(e,[]);handlers.get(e).push(fn)}},async saveMetadata(){window.__breezeDemo.metadataSaves++},saveSettingsDebounced(){window.__breezeDemo.settingsSaves++},setExtensionPrompt(key,value,position,depth,scan,role){this.extensionPrompts[key]={value,position,depth,scan,role}}};
 if (saved?.settings) context.extensionSettings = saved.settings;
 if (chatStates[context.chatId]) context.chatMetadata = chatStates[context.chatId];
@@ -60,8 +61,66 @@ context.saveMetadata = async () => { window.__breezeDemo.metadataSaves++; persis
 context.saveSettingsDebounced = () => { window.__breezeDemo.settingsSaves++; persistDemo(); };
 window.SillyTavern = {getContext:()=>context};
 window.__breezeDemo = {
-    context,metadataSaves:0,settingsSaves:0,
+    context,metadataSaves:0,settingsSaves:0,hostStreamTrace:[],
     emit:(event,...args)=>{for(const handler of handlers.get(event)||[])handler(...args)},
+    beginStream({ type = 'normal', initial = '' } = {}) {
+        this.emit('GENERATION_STARTED', type, {}, false);
+        const continuing = type === 'continue' && context.chat.length > 0;
+        const messageId = continuing ? context.chat.length - 1 : context.chat.length;
+        const continueMessage = continuing ? context.chat[messageId].mes : '';
+        if (!continuing) {
+            context.chat.push({ mes: initial, swipe_id: 0, is_user: false, name: '演示角色' });
+            const message = document.createElement('div'), text = document.createElement('div');
+            message.className = 'mes'; message.setAttribute('mesid', messageId);
+            text.className = 'mes_text'; text.textContent = initial;
+            message.append(text); document.querySelector('#chat').append(message);
+        }
+        context.streamingProcessor = { messageId, type, result: initial, continueMessage, isFinished: false, isStopped: false };
+        this.hostStreamTrace.push({ phase: 'start', messageId });
+        return messageId;
+    },
+    async streamText(text, { redrawDelay = 0, rawBeforeRedraw = false } = {}) {
+        const processor = context.streamingProcessor;
+        if (!processor) throw new Error('No demo text stream is active.');
+        processor.result = text;
+        // Match this installation's StreamingProcessor.generate: token event first,
+        // then its frame-throttled onProgressStreaming updates chat and replaces DOM.
+        this.hostStreamTrace.push({ phase: 'token', raw: context.chat[processor.messageId].mes });
+        this.emit('STREAM_TOKEN_RECEIVED', text);
+        const raw = processor.continueMessage + text;
+        // onProgressStreaming stores raw text before awaiting reasoning work.
+        // During that await, the visible message may still be from the last frame.
+        if (rawBeforeRedraw) {
+            context.chat[processor.messageId].mes = raw;
+            this.hostStreamTrace.push({ phase: 'raw-update', raw });
+        }
+        await new Promise(resolve => setTimeout(resolve, redrawDelay));
+        context.chat[processor.messageId].mes = raw;
+        const body = document.querySelector('.mes[mesid="' + processor.messageId + '"] .mes_text');
+        body.textContent = raw;
+        this.hostStreamTrace.push({ phase: 'redraw', raw });
+    },
+    finishStream({ endBeforeReceive = false } = {}) {
+        const processor = context.streamingProcessor;
+        if (!processor) throw new Error('No demo text stream is active.');
+        processor.isFinished = true;
+        if (endBeforeReceive) this.emit('GENERATION_ENDED');
+        this.emit('MESSAGE_RECEIVED', processor.messageId, processor.type);
+        this.emit('CHARACTER_MESSAGE_RENDERED', processor.messageId, processor.type);
+        if (!endBeforeReceive) this.emit('GENERATION_ENDED');
+        context.streamingProcessor = null;
+    },
+    stopStream() {
+        const processor = context.streamingProcessor;
+        if (!processor) throw new Error('No demo text stream is active.');
+        processor.isStopped = true; processor.isFinished = true;
+        this.emit('GENERATION_STOPPED');
+        // Some hosts still finalize an interrupted assistant message afterwards.
+        this.emit('MESSAGE_RECEIVED', processor.messageId, processor.type);
+        this.emit('CHARACTER_MESSAGE_RENDERED', processor.messageId, processor.type);
+        this.emit('GENERATION_ENDED');
+        context.streamingProcessor = null;
+    },
     switchChat(id) {
         chatStates[context.chatId] = context.chatMetadata;
         context.chatId = id;

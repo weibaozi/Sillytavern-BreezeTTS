@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTTS, discoverSpeakers, chatKey, mappedVoice, cacheKey, requestFor, normalizeBase, DEFAULTS } from '../extension/core.js';
+import { parseTTS, parseStreamingTTS, discoverSpeakers, chatKey, mappedVoice, cacheKey, requestFor, normalizeBase, DEFAULTS } from '../extension/core.js';
 
 test('nested vocal tags, colons and repeated passages remain intact', () => {
     const raw = '“走吧。”\n[TTSVoice:周启明:开心:[笑]走吧。时间是：12:30。[叹气]]\n[TTSVoice：周启明：：走吧。]';
@@ -61,4 +61,87 @@ test('service URL rejects credentials and non-HTTP schemes', () => {
     assert.equal(normalizeBase('http://localhost:7860/'), 'http://localhost:7860');
     assert.throws(() => normalizeBase('javascript:alert(1)'));
     assert.throws(() => normalizeBase('https://user:pass@host/'));
+});
+
+test('streaming header fragments are quiet, bounded display-only spans', () => {
+    assert.equal(DEFAULTS.readStreamingText, false);
+    for (const fragment of ['[T', '[TT', '[TTSVo', '[ttsvoice', '[TTSVoice ', '[TTSVoice:', '[TTSVoice:周启明', '[TTSVoice:周启明:', '[TTSVoice:周启明:happy:']) {
+        const raw = `旁白。\n  ${fragment}`;
+        const result = parseStreamingTTS(raw);
+        assert.deepEqual(result.segments, [], fragment);
+        assert.deepEqual(result.diagnostics, [], fragment);
+        assert.equal(result.pending.length, 1, fragment);
+        assert.equal(result.pending[0].raw, fragment);
+        assert.equal(raw.slice(result.pending[0].start, result.pending[0].end), fragment);
+        assert.equal(result.pending[0].text, '');
+    }
+    for (const ordinary of ['[', '[Today', '正文 [TTSVo', '[TTS Voice', '[TTSVoiceX']) {
+        assert.deepEqual(parseStreamingTTS(ordinary).pending, [], ordinary);
+    }
+});
+
+test('streaming exposes speech after metadata and hides only unfinished inner brackets', () => {
+    const raw = '他转过头。[tTsVoIcE：周启明：：时间是：12:30。[笑]走吧[叹';
+    const result = parseStreamingTTS(raw);
+    assert.deepEqual(result.segments, []);
+    assert.deepEqual(result.diagnostics, []);
+    assert.equal(result.pending.length, 1);
+    assert.equal(result.pending[0].speaker, '周启明');
+    assert.equal(result.pending[0].emotion, 'default');
+    assert.equal(result.pending[0].text, '时间是：12:30。[笑]走吧');
+    assert.equal(parseStreamingTTS('[TTSVoice:A:happy:你好[未识别[嵌套]').pending[0].text, '你好');
+    assert.equal(parseStreamingTTS('[TTSVoice:A:happy:[笑]你好').pending[0].text, '[笑]你好');
+});
+
+test('stream completion hands off exactly once to ordinary parsing and retains repeated speech', () => {
+    const tag = '[TTSVoice:周启明:happy:[笑]走吧。]';
+    const prefix = `${tag}\n${tag}\n`;
+    const pending = parseStreamingTTS(`${prefix}${tag.slice(0, -1)}`);
+    assert.equal(pending.segments.length, 2);
+    assert.equal(pending.pending.length, 1);
+    const raw = `${prefix}${tag}`;
+    const complete = parseStreamingTTS(raw);
+    assert.deepEqual(complete.segments, parseTTS(raw).segments);
+    assert.deepEqual(complete.pending, []);
+    assert.deepEqual(complete.diagnostics, []);
+    assert.deepEqual(complete.segments.map(segment => segment.ordinal), [0, 1, 2]);
+    for (const segment of complete.segments) assert.equal(raw.slice(segment.start, segment.end), segment.raw);
+});
+
+test('streaming respects user, code, comments and unfinished non-body exclusions', () => {
+    const pending = '[TTSVoice:A:happy:你好';
+    for (const raw of [
+        `[TTSVoice:包子:happy:你好`, '[TTSVoice:{{user}}:happy:你好',
+        `\`\`\`text\n${pending}`, `~~~text\n${pending}`, `<!-- ${pending}`,
+        `<w2g>${pending}`, `<catsay><details>${pending}`, `<code>${pending}`,
+        `<!-- 3.正文后的格式 -->\n${pending}`, `\`${pending}`, `\`\`example \` ${pending}`,
+    ]) {
+        assert.deepEqual(parseStreamingTTS(raw, '包子').pending, [], raw);
+        assert.deepEqual(parseStreamingTTS(raw, '包子').segments, [], raw);
+    }
+    const raw = `\`${pending}\`\n${pending}`;
+    assert.equal(parseStreamingTTS(raw).pending[0].start, raw.lastIndexOf(pending));
+    assert.equal(parseStreamingTTS(`\\\`${pending}`).pending.length, 1, 'escaped backtick does not open code');
+});
+
+test('streaming recovers after malformed earlier tags without claiming later narration', () => {
+    const raw = '[TTSVoice:A:happy:坏[笑]\n普通旁白。\n[TTSVoice:B:happy:完整]\n[TTSVoice:C:default:继续[叹';
+    const result = parseStreamingTTS(raw);
+    assert.deepEqual(result.segments.map(segment => segment.speaker), ['B']);
+    assert.equal(result.pending[0].speaker, 'C');
+    assert.equal(result.pending[0].text, '继续');
+    assert.equal(result.pending[0].raw, '[TTSVoice:C:default:继续[叹');
+    assert.equal(result.diagnostics.length, 1);
+    assert.equal(result.diagnostics[0].offset, 0);
+    assert.deepEqual(parseStreamingTTS('[TTSVoice:A:happy:坏\n接下来是旁白。').pending, []);
+    assert.deepEqual(parseStreamingTTS('[TTSVoice:A:happy:跨\n行]').pending, []);
+    for (const invalid of ['[TTSVoice::happy:未闭合', '[TTSVoice:A:[happy:未闭合', '[TTSVoice:A:happy:]']) {
+        const result = parseStreamingTTS(invalid);
+        assert.deepEqual(result.pending, [], invalid);
+        assert.equal(result.diagnostics.length, 1, invalid);
+    }
+    const restarted = parseStreamingTTS('[TTSVoice:A:happy:坏[TTSVoice:B:default:正确');
+    assert.equal(restarted.pending.length, 1);
+    assert.equal(restarted.pending[0].speaker, 'B');
+    assert.equal(restarted.diagnostics.length, 1);
 });

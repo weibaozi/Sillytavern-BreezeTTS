@@ -2,10 +2,10 @@
 export const KEY = 'breeze_voice';
 export const DEFAULTS = Object.freeze({
     enabled: true, baseUrl: 'http://127.0.0.1:7860', autoGenerate: false,
-    autoPlay: false, streaming: false, volume: 0.8, hideTags: true, cfgScale: 4, seed: 42,
+    autoPlay: false, streaming: false, readStreamingText: false, volume: 0.8, hideTags: true, cfgScale: 4, seed: 42,
 });
 
-function excludedText(raw) {
+function excludedText(raw, streaming = false) {
     // Keep character offsets intact so rendered tags can be matched to raw messages.
     const blank = s => s.replace(/[^\r\n]/g, ' ');
     let text = raw.replace(/```[^]*?(?:```|$)|~~~[^]*?(?:~~~|$)/g, blank);
@@ -21,7 +21,12 @@ function excludedText(raw) {
         closers.lastIndex = backticks.lastIndex;
         let closer;
         while ((closer = closers.exec(text)) && closer[0].length !== opener[0].length) {}
-        if (!closer) continue;
+        if (!closer) {
+            // While a message is arriving, an unmatched opener may still become
+            // a code span. Do not treat its contents as provisional speech.
+            if (streaming) { text = text.slice(0, opener.index) + blank(text.slice(opener.index)); break; }
+            continue;
+        }
         const end = closers.lastIndex;
         text = text.slice(0, opener.index) + blank(text.slice(opener.index, end)) + text.slice(end);
         backticks.lastIndex = end;
@@ -51,7 +56,11 @@ function excludedText(raw) {
 }
 
 export function parseTTS(raw = '', userName = '') {
-    const text = excludedText(String(raw));
+    raw = String(raw);
+    return parsePreparedTTS(raw, excludedText(raw), userName);
+}
+
+function parsePreparedTTS(raw, text, userName) {
     const segments = [], diagnostics = [];
     const startPattern = /\[TTSVoice\s*[:：]/gi;
     let match;
@@ -75,6 +84,77 @@ export function parseTTS(raw = '', userName = '') {
             start: match.index, end, raw: String(raw).slice(match.index, end), ordinal: segments.length });
     }
     return { segments, diagnostics };
+}
+
+function pendingSpeech(body) {
+    // An unfinished nested event ("你好[叹") must not leak its partial name
+    // into the visible dialogue. Complete events remain for displayDialogue.
+    let depth = 0, open = -1;
+    for (let i = 0; i < body.length; i++) {
+        if (body[i] === '[') { if (!depth) open = i; depth++; }
+        else if (body[i] === ']') depth--;
+    }
+    return (depth ? body.slice(0, open) : body).trim();
+}
+
+function pendingTag(raw, start, headLength, userName) {
+    const suffix = raw.slice(start + headLength);
+    let depth = 1;
+    for (const char of suffix) {
+        if (char === '[') depth++;
+        else if (char === ']') depth--;
+        if (!depth) return null; // A closed but invalid tag is not in progress.
+    }
+    const parts = suffix.split(/[:：]/);
+    const speaker = parts[0].trim();
+    if (/[\[\]\r\n]/.test(parts[0]) || (parts.length > 1 && !speaker)) return null;
+    if (speaker && (speaker === userName.trim() || speaker === '{{user}}')) return null;
+    const result = { start, end: raw.length, raw: raw.slice(start), text: '' };
+    if (speaker) result.speaker = speaker;
+    if (parts.length < 2) return result;
+    if (/[\[\]\r\n]/.test(parts[1])) return null;
+    const emotion = parts[1].trim();
+    if (emotion || parts.length > 2) result.emotion = emotion || 'default';
+    if (parts.length > 2) {
+        const first = suffix.search(/[:：]/);
+        const second = suffix.slice(first + 1).search(/[:：]/) + first + 1;
+        result.text = pendingSpeech(suffix.slice(second + 1));
+    }
+    return result;
+}
+
+/** Complete tags may be queued for speech; pending spans are display-only. */
+export function parseStreamingTTS(raw = '', userName = '') {
+    raw = String(raw);
+    const text = excludedText(raw, true);
+    const parsed = parsePreparedTTS(raw, text, userName);
+    const pending = [];
+    const lineStart = Math.max(text.lastIndexOf('\n'), text.lastIndexOf('\r')) + 1;
+    const line = text.slice(lineStart);
+    // Only the final line can still grow into a valid single-line tag. Starting
+    // at its last header also prevents malformed earlier tags swallowing it.
+    const headers = [...line.matchAll(/\[TTSVoice\s*[:：]/gi)];
+    const header = headers.at(-1);
+    if (header) {
+        const start = lineStart + header.index;
+        if (!parsed.segments.some(segment => segment.start <= start && segment.end > start)) {
+            const candidate = pendingTag(raw, start, header[0].length, userName);
+            if (candidate) pending.push(candidate);
+        }
+    } else {
+        // Short prefixes are ambiguous in prose, so recognize them only as the
+        // first content on a line. A lone '[' remains ordinary text.
+        const fragment = /^\s*(\[T[^\r\n]*)$/i.exec(line);
+        if (fragment) {
+            const value = fragment[1];
+            if ('[ttsvoice'.startsWith(value.toLowerCase()) || /^\[TTSVoice[ \t]*$/i.test(value)) {
+                const start = lineStart + line.length - value.length;
+                pending.push({ start, end: raw.length, raw: raw.slice(start), text: '' });
+            }
+        }
+    }
+    const pendingOffsets = new Set(pending.map(span => span.start));
+    return { ...parsed, pending, diagnostics: parsed.diagnostics.filter(item => !pendingOffsets.has(item.offset)) };
 }
 
 export function chatKey(ctx) {

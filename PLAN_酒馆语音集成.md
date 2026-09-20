@@ -1,8 +1,17 @@
-# 酒馆 × Breeze TTS 实施计划 · 0.7.0-tag-render.1
+# 酒馆 × Breeze TTS 实施计划 · 0.7.0-tag-render.2
 
-状态：新建 `experiment/ttsvoice-render` 实验分支，开发单份 TTSVoice 对白的显示渲染；真实酒馆仍使用稳定版，未安装实验。稳定分支 `stable/v0.6.1` 与标签 `v0.6.1` 保留在 `60df1f8`。2026-09-19。
+状态：`experiment/ttsvoice-render` 已实现单份 TTSVoice 渲染；前版已安装，本次新增读取流式文本与原生引号主题样式。稳定分支 `stable/v0.6.1` 与标签 `v0.6.1` 保留在 `60df1f8`。2026-09-19。
 
 工作区：TTS 仍在 `G:\study\AI\breeze-tts`，稳定插件在其 `sillytavern-breeze` 下；实验插件在 `G:\study\AI\breeze-tts\sillytavern-breeze\branches\ttsvoice-render`。使用各目录自己的工作区文件；本实验不更改后端。安装步骤见 [README](README.md)。
+
+## 本次更新：流式文本与对白样式
+
+- 输出过程中实时隐藏未闭合标签的元数据，展示已经到达的对白；原始消息保持不变，未闭合内容不会合成。
+- 新增「读取流式文本」设置，完整标签到达后按自动生成／自动播放开关追加到顺序队列；关闭后仍即时渲染，但自动语音等待整条回复结束。
+- 与「流式生成与播放」音频开关独立；停止、编辑、切换回复及聊天会撤销旧队列。续写只处理新增或补完的标签。
+- 对白使用原生 q 元素及酒馆引号主题色，默认橘黄色。
+
+以下单份对白基础实现及验证数字记录 0.7.0-tag-render.1；最新使用与验证见 README。
 
 ## 本次实验：单份对白
 

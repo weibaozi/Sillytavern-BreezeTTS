@@ -34,5 +34,5 @@ if ($PSCmdlet.ShouldProcess($destination, 'Back up existing extension and instal
         Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
     }
     Write-Output "Installed: $destination"
-    Write-Output 'Reload SillyTavern. Restart Breeze WebUI and load the model before connecting.'
+    Write-Output 'Reload SillyTavern. This extension update does not require restarting the Breeze backend.'
 }
