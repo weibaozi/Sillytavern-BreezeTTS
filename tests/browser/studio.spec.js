@@ -157,6 +157,7 @@ test('design candidates can be saved; errors and cancellation recover the form',
 
 test('375px mobile layout has no horizontal overflow and every tab and form is reachable', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
+    await page.locator('#breeze-floating-controls').getByRole('button', { name: '收起语音面板', exact: true }).click();
     await openStudio(page);
     for (const name of ['characters', 'voices', 'design', 'prompt', 'connection']) {
         await tab(page, name).click();

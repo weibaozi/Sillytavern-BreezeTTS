@@ -9,9 +9,11 @@ export class SpeechPlayer {
         this.controller = null; this.audio = null; this.current = null; this.volume = 0.8;
         this.onStateChange = onStateChange; this._paused = false;
         this._activeItems = []; this._resumeWaiters = new Set(); this._playRevision = 0;
+        this._audioReady = null;
     }
     get active() { return !!this.controller && !this.controller.signal.aborted && this._activeItems.length > 0; }
     get paused() { return this._paused; }
+    get position() { return Math.max(0, Number(this.audio?.currentTime) || 0); }
     get activeItems() { return [...this._activeItems]; }
     notifyState() {
         try { this.onStateChange({ active: this.active, paused: this.paused, current: this.current, items: this.activeItems }); }
@@ -69,6 +71,12 @@ export class SpeechPlayer {
         checkAbort(signal);
         if (this._paused) return;
         const revision = this._playRevision;
+        if (this._audioReady?.audio === audio) {
+            await this._audioReady.promise;
+            checkAbort(signal);
+            if (this.audio !== audio) throw aborted();
+            if (this._paused || revision !== this._playRevision) return;
+        }
         try { await audio.play(); }
         catch (error) {
             if (signal.aborted) throw aborted();
@@ -84,13 +92,14 @@ export class SpeechPlayer {
         this.controller?.abort(); this.controller = null;
         this.streamSession?.dispose(); this.streamSession = null;
         if (this.audio && !this.audio.dispose) { this.audio.pause(); this.audio.removeAttribute('src'); this.audio.load(); }
-        this.audio = null; this.current = null;
+        this.audio = null; this.current = null; this._audioReady = null;
         this._activeItems = [];
         if (!preservePause) this._paused = false;
         this.notifyState();
     }
-    async run(items, { play = true, stream = false, preservePause = false } = {}) {
+    async run(items, { play = true, stream = false, preservePause = false, startOffset = 0, startPaused = false } = {}) {
         this.stop({ preservePause });
+        if (play && startPaused) this._paused = true;
         const controller = new AbortController(); this.controller = controller;
         this._activeItems = play ? [...items] : [];
         this.notifyState();
@@ -134,13 +143,15 @@ export class SpeechPlayer {
                 if (result.error) { this.update(item, 'error', result.error.message); throw result.error; }
                 if (!streaming) next = i + 1 < items.length ? prepare(items[i + 1]) : null;
                 if (play) {
-                    await this.waitForResume(signal); checkAbort(signal);
+                    // A paused seek still needs its first WAV loaded and positioned.
+                    if (!(i === 0 && startPaused && !result.value.streamUrl)) await this.waitForResume(signal);
+                    checkAbort(signal);
                     if (result.value.streamUrl) {
                         if (!transport) throw new Error('流式播放未启用。');
                         await this.playStream(item, result.value, signal, transport,
                             () => pendingStreams.delete(result.value));
                     }
-                    else await this.playOne(item, result.value, signal);
+                    else await this.playOne(item, result.value, signal, i === 0 ? startOffset : 0);
                 }
                 if (streaming) next = i + 1 < items.length ? prepare(items[i + 1]) : null;
             }
@@ -150,7 +161,7 @@ export class SpeechPlayer {
             transport?.dispose();
             if (this.streamSession === transport) this.streamSession = null;
             if (this.controller === controller) {
-                this.controller = null; this.audio = null; this.current = null; this._activeItems = [];
+                this.controller = null; this.audio = null; this.current = null; this._activeItems = []; this._audioReady = null;
                 if (!preservePause || !completed) this._paused = false;
                 this.notifyState();
             }
@@ -180,19 +191,27 @@ export class SpeechPlayer {
             if (this.audio === transport) { this.audio = null; this.current = null; this.notifyState(); }
         }
     }
-    async playOne(item, record, signal) {
+    async playOne(item, record, signal, startOffset = 0) {
         checkAbort(signal);
         const audio = this.audioFactory(); this.audio = audio; this.current = item;
-        audio.volume = this.volume; audio.src = record.url;
-        this.notifyState();
+        audio.volume = this.volume;
+        const requestedOffset = Number(startOffset);
+        const offset = Number.isFinite(requestedOffset) ? Math.max(0, requestedOffset) : 0;
         return new Promise((resolve, reject) => {
             let finished = false;
+            let ready, failReady;
+            const readiness = { audio, promise: new Promise((resolve, reject) => { ready = resolve; failReady = reject; }) };
+            // A paused initial seek may have no play() waiting on metadata yet.
+            void readiness.promise.catch(() => {});
+            this._audioReady = readiness;
             const finish = error => {
                 if (finished) return;
                 finished = true;
+                if (error) failReady(error); else ready();
                 signal.removeEventListener('abort', stop);
-                audio.onended = null; audio.onerror = null;
+                audio.onended = null; audio.onerror = null; audio.onloadedmetadata = null;
                 audio.pause(); audio.removeAttribute('src'); audio.load();
+                if (this._audioReady === readiness) this._audioReady = null;
                 if (this.audio === audio) { this.audio = null; this.current = null; this.notifyState(); }
                 if (!signal.aborted) this.update(item, error ? 'error' : 'ready', error?.message, record.duration);
                 error ? reject(error) : resolve();
@@ -201,6 +220,24 @@ export class SpeechPlayer {
             signal.addEventListener('abort', stop, { once: true });
             audio.onended = () => finish();
             audio.onerror = () => finish(new Error('音频读取失败，请检查服务或重新生成。'));
+            const positionAudio = () => {
+                if (finished || signal.aborted) return;
+                try {
+                    if (offset > 0) {
+                        const duration = Number(audio.duration);
+                        audio.currentTime = Number.isFinite(duration) && duration >= 0 ? Math.min(offset, duration) : offset;
+                    }
+                    audio.onloadedmetadata = null;
+                    ready();
+                    this.notifyState();
+                } catch (error) { finish(error); }
+            };
+            audio.onloadedmetadata = positionAudio;
+            audio.preload = 'auto'; audio.src = record.url;
+            if (!offset || audio.readyState >= 1) positionAudio();
+            else this.notifyState();
+            if (signal.aborted) { stop(); return; }
+            if (finished) return;
             this.update(item, this._paused ? 'paused' : 'playing', '', record.duration);
             this.playAudio(audio, signal).catch(error => finish(error));
         });

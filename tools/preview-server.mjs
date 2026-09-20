@@ -216,7 +216,19 @@ const server = createServer(async (req, res) => {
         }
         if (/^\/breeze\/(voices|jobs)\/[a-f0-9]{32}\/audio$/.test(path) && req.method === 'GET') {
             state.audioRequests.push({ path, at: Date.now() });
-            res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': demoAudio.length, 'Cache-Control': 'no-store' }); return res.end(demoAudio);
+            const headers = { 'Content-Type': 'audio/wav', 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+            // Match the production FileResponse so browsers can seek cached WAVs.
+            if (req.headers.range) {
+                const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+                const start = range?.[1] ? Number(range[1]) : Math.max(0, demoAudio.length - Number(range?.[2]));
+                const end = range?.[1] && range[2] ? Math.min(Number(range[2]), demoAudio.length - 1) : demoAudio.length - 1;
+                if (!range || (!range[1] && !range[2]) || !Number.isSafeInteger(start) || start > end || start >= demoAudio.length) {
+                    res.writeHead(416, { ...headers, 'Content-Range': `bytes */${demoAudio.length}` }); return res.end();
+                }
+                const content = demoAudio.subarray(start, end + 1);
+                res.writeHead(206, { ...headers, 'Content-Length': content.length, 'Content-Range': `bytes ${start}-${end}/${demoAudio.length}` }); return res.end(content);
+            }
+            res.writeHead(200, { ...headers, 'Content-Length': demoAudio.length }); return res.end(demoAudio);
         }
         if (runtimeFiles.has(decodeURIComponent(path.slice(1))) && req.method === 'GET') {
             const filename = resolve(project, decodeURIComponent(path.slice(1)));

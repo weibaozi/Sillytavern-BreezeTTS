@@ -2,7 +2,8 @@ import { test, expect } from '@playwright/test';
 
 const studio = page => page.locator('#breeze-studio-host').locator('dialog');
 const current = page => page.locator('#chat .mes').last();
-const controls = page => current(page).locator('.breeze-message-controls');
+const panel = page => page.locator('#breeze-floating-controls');
+const controls = page => panel(page).locator('.breeze-message-controls');
 const play = page => controls(page).locator('.breeze-message-play');
 const pause = page => controls(page).locator('.breeze-message-pause');
 const stop = page => controls(page).locator('.breeze-message-stop');
@@ -29,12 +30,10 @@ async function configure(page, values) {
 async function replaceMessage(page, raw) {
     await page.evaluate(raw => {
         const demo = window.__breezeDemo, id = demo.context.chat.length - 1;
-        for (const tray of document.querySelectorAll(`.mes[mesid="${id}"] .breeze-tray`)) tray.dataset.fixtureStale = 'true';
         demo.context.chat[id].mes = raw;
         document.querySelector(`.mes[mesid="${id}"] .mes_text`).textContent = raw;
         demo.emit('MESSAGE_UPDATED', id);
     }, raw);
-    await expect(current(page).locator('.breeze-tray[data-fixture-stale]')).toHaveCount(0);
     await expect(current(page).locator('.breeze-bubble')).toHaveCount(raw.split('[TTSVoice:').length - 1);
 }
 
@@ -70,29 +69,52 @@ test.beforeEach(async ({ page, request }) => {
     });
     await page.goto('/');
     await expect(current(page).locator('.breeze-bubble').first()).toHaveAttribute('data-state', 'idle');
+    await expect(panel(page)).toHaveCount(1);
+    await expect(page.locator('#chat .breeze-message-controls')).toHaveCount(0);
     await expect(controls(page).locator('button')).toHaveCount(4);
 });
 
 for (const width of [1440, 375]) {
-    test(`${width}px message controls stay horizontal and wrap as complete buttons despite host button sizing`, async ({ page }) => {
+    test(`${width}px floating controls stay in the viewport with readable labels despite hostile host button styles`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 });
-        await page.addStyleTag({ content: '.menu_button { width: min-content; } #chat button { width: min-content; white-space: normal; overflow-wrap: anywhere; }' });
+        await page.screenshot({ path: `test-results/floating-controls-${width}.png` });
+        await page.addStyleTag({ content: 'button, .menu_button { width: min-content !important; white-space: normal !important; overflow-wrap: anywhere !important; padding: 60px !important; font-size: 70px !important; }' });
         await expect(pause(page)).toBeDisabled();
         await expect(stop(page)).toBeDisabled();
-        await expect(controls(page)).toHaveCSS('flex-wrap', 'wrap');
         const check = async () => {
+            const panelBounds = await panel(page).evaluate(node => {
+                const rect = node.getBoundingClientRect();
+                return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+                    viewportHeight: innerHeight, controls: [...node.shadowRoot.querySelectorAll('button,select,input')]
+                        .filter(control => control.getBoundingClientRect().width > 0)
+                        .map(control => {
+                            const bound = control.getBoundingClientRect();
+                            return { left: bound.left, right: bound.right, top: bound.top, bottom: bound.bottom };
+                        }) };
+            });
+            expect(panelBounds.left).toBeGreaterThanOrEqual(0);
+            expect(panelBounds.right).toBeLessThanOrEqual(width);
+            expect(panelBounds.top).toBeGreaterThanOrEqual(0);
+            expect(panelBounds.bottom).toBeLessThanOrEqual(panelBounds.viewportHeight);
+            for (const bound of panelBounds.controls) {
+                expect(bound.left).toBeGreaterThanOrEqual(panelBounds.left - 1);
+                expect(bound.right).toBeLessThanOrEqual(panelBounds.right + 1);
+                expect(bound.top).toBeGreaterThanOrEqual(panelBounds.top - 1);
+                expect(bound.bottom).toBeLessThanOrEqual(panelBounds.bottom + 1);
+            }
             const bounds = await controls(page).evaluate(node => {
                 const parent = node.getBoundingClientRect();
                 return [...node.querySelectorAll('button')].map(button => {
-                    const rect = button.getBoundingClientRect(), style = getComputedStyle(button);
+                    const rect = button.getBoundingClientRect(), text = document.createRange();
+                    text.selectNodeContents(button);
                     return { width: rect.width, height: rect.height, left: rect.left, right: rect.right,
                         top: rect.top, parentLeft: parent.left, parentRight: parent.right,
-                        whiteSpace: style.whiteSpace, flexShrink: style.flexShrink };
+                        labelLines: text.getClientRects().length, clientWidth: button.clientWidth, scrollWidth: button.scrollWidth };
                 });
             });
             for (const bound of bounds) {
-                expect(bound.whiteSpace).toBe('nowrap');
-                expect(bound.flexShrink).toBe('0');
+                expect(bound.labelLines).toBe(1);
+                expect(bound.scrollWidth).toBeLessThanOrEqual(bound.clientWidth + 1);
                 expect(bound.width).toBeGreaterThan(bound.height);
                 expect(bound.height).toBeLessThanOrEqual(44);
                 expect(bound.left).toBeGreaterThanOrEqual(bound.parentLeft - 1);
@@ -101,18 +123,17 @@ for (const width of [1440, 375]) {
             return bounds;
         };
         const initial = await check();
-        if (width > 375) expect(initial.every(button => button.top === initial[0].top)).toBe(true);
-        else expect(initial[1].top).toBe(initial[0].top);
+        expect(initial[1].top).toBe(initial[0].top);
+        expect(initial[3].top).toBe(initial[2].top);
+        expect(initial[2].top).toBeGreaterThan(initial[0].top);
         await refresh(page).evaluate(node => { node.textContent = '重新获取中 99/100'; node.disabled = true; });
         await check();
-        await controls(page).evaluate(node => { node.style.maxWidth = '165px'; });
-        const wrapped = await check();
-        expect(wrapped.some(button => button.top > wrapped[0].top)).toBe(true);
     });
 }
 
 test('narration chunk target fits the studio and exposes its range and default on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
+    await panel(page).getByRole('button', { name: '收起语音面板', exact: true }).click();
     await openStudio(page);
     const input = studio(page).locator('[data-narrator-target-chars]');
     await expect(input).toHaveValue('100');
@@ -237,12 +258,14 @@ test('refresh replaces cached character and narrator speech, repeats equal entri
     await expect(refresh(page)).toBeDisabled();
     await expect(refresh(page)).toHaveText(/重新获取中\s+0\/5/);
     await expect(controls(page)).toHaveAttribute('data-state', 'refreshing');
+    await expect(panel(page).getByRole('combobox', { name: '朗读的回复' })).toBeDisabled();
+    await expect(panel(page).getByRole('slider', { name: '本条语音播放进度' })).toBeDisabled();
     await expect(stop(page)).toBeEnabled();
     await expect(pause(page)).toBeDisabled();
     release();
     await expect(refresh(page)).toBeEnabled();
     await expect(refresh(page)).toHaveText('↻ 重新获取');
-    await expect(controls(page).locator('.breeze-message-feedback')).toHaveText('已重新获取 5 段语音。');
+    await expect(panel(page).locator('.breeze-message-feedback')).toHaveText('已重新获取 5 段语音。');
     const after = await state(request), refreshed = after.requests.slice(original.requests.length);
     expect(refreshed.map(job => [job.text, job.voice_id])).toEqual([
         ['晨光照进教室。', '3'.repeat(32)], ['同一句话。', '1'.repeat(32)], ['同一句话。', '1'.repeat(32)],
@@ -270,7 +293,7 @@ test('refresh stops an active stream and only prepares replacement speech', asyn
     const starts = await page.evaluate(() => window.__controlsStarts.length);
     await refresh(page).click();
     await expect(refresh(page)).toBeEnabled();
-    await expect(controls(page).locator('.breeze-message-feedback')).toHaveText('已重新获取 2 段语音。');
+    await expect(panel(page).locator('.breeze-message-feedback')).toHaveText('已重新获取 2 段语音。');
     await expect.poll(async () => (await probe(page, true))?.closed).toBe(true);
     const result = await state(request);
     expect(result.requests).toHaveLength(3);
@@ -306,9 +329,11 @@ for (const action of ['stop', 'chat']) {
         expect(await page.evaluate(() => window.__controlsStarts.length)).toBe(0);
         expect(await page.evaluate(() => Object.keys(window.__breezeDemo.context.chatMetadata.breeze_voice.cache))).toEqual([]);
         if (action === 'chat') {
-            const previousControls = await controls(page).elementHandle();
+            const singleton = await panel(page).elementHandle();
             await page.evaluate(() => window.__breezeDemo.switchChat('demo-campus-chat'));
-            await expect.poll(() => previousControls.evaluate(node => node.isConnected)).toBe(false);
+            await expect.poll(() => singleton.evaluate(node => node.isConnected)).toBe(true);
+            await expect(panel(page)).toHaveCount(1);
+            await expect(panel(page).getByRole('combobox', { name: '朗读的回复' })).toHaveValue('');
             await expect(refresh(page)).toBeEnabled();
             expect(await page.evaluate(() => Object.keys(window.__breezeDemo.context.chatMetadata.breeze_voice.cache))).toEqual([]);
         }

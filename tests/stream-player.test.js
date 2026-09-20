@@ -43,6 +43,53 @@ const descriptor = (events, extra = {}) => {
         body: new ReadableStream({ start(controller) { controller.enqueue(encoded); controller.close(); } }) }), ...extra };
 };
 
+test('PCM progress follows played samples, freezes on pause, and resets for each segment', async () => {
+    const context = new FakeContext(), controller = new AbortController();
+    const player = new PCMStreamPlayer({ contextFactory: () => context });
+    await player.wake(controller.signal);
+    const running = player.run(descriptor([audio(new Array(16000).fill(0)), audio(new Array(16000).fill(0)), done]), controller.signal);
+    await tick(); assert.equal(player.currentTime, 0);
+    context.currentTime = context.sources[0].when + 0.25;
+    assert.ok(Math.abs(player.currentTime - 0.25) < 1e-9);
+    context.currentTime = context.sources[1].when + 0.5;
+    context.sources[0].onended();
+    assert.ok(Math.abs(player.currentTime - 1.5) < 1e-9);
+    player.pause();
+    // Even an asynchronously changing context clock cannot move a paused UI cursor.
+    context.currentTime += 0.1;
+    assert.ok(Math.abs(player.currentTime - 1.5) < 1e-9);
+    context.currentTime -= 0.1;
+    await player.play(); assert.ok(Math.abs(player.currentTime - 1.5) < 1e-9);
+    context.finish(); await running; assert.equal(player.currentTime, 2);
+    const next = player.run(descriptor([audio(new Array(8000).fill(0)), done]), controller.signal);
+    assert.equal(player.currentTime, 0);
+    await tick(); assert.equal(player.currentTime, 0);
+    context.finish(); await next; assert.equal(player.currentTime, 0.5);
+    player.dispose();
+});
+
+test('PCM progress excludes network gaps and retains elapsed audio after cancellation', async () => {
+    const context = new FakeContext(), controller = new AbortController(); let stream;
+    const player = new PCMStreamPlayer({ contextFactory: () => context });
+    await player.wake(controller.signal);
+    const send = event => stream.enqueue(new TextEncoder().encode(JSON.stringify(event) + '\n'));
+    const running = player.run({ streamUrl: '/stream', fetcher: async () => ({ ok: true,
+        body: new ReadableStream({ start(value) { stream = value; } }) }) }, controller.signal);
+    const failure = assert.rejects(running, { name: 'AbortError' });
+    await tick(); send(audio(new Array(8000).fill(0))); await tick();
+    context.currentTime = context.sources[0].when + 0.5;
+    context.sources[0].onended(); assert.equal(player.currentTime, 0.5);
+    context.currentTime += 3; assert.equal(player.currentTime, 0.5);
+    send(audio(new Array(8000).fill(0))); await tick();
+    assert.equal(player.currentTime, 0.5);
+    context.currentTime = context.sources[1].when + 0.25;
+    assert.ok(Math.abs(player.currentTime - 0.75) < 1e-9);
+    controller.abort(); await failure;
+    context.currentTime += 10;
+    assert.ok(Math.abs(player.currentTime - 0.75) < 1e-9);
+    player.dispose();
+});
+
 test('PCM decoding is signed little-endian and rejects malformed samples', () => {
     assert.deepEqual([...decodePCM(pcm([-32768, -1, 0, 32767]))], [-1, -1 / 32768, 0, 32767 / 32768]);
     assert.throws(() => decodePCM('AA=='), /不完整/);

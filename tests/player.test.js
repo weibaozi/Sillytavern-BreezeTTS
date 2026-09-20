@@ -7,11 +7,103 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 const item = id => ({ id });
 class FakeAudio {
     paused = true;
+    currentTime = 0;
     removeAttribute() {}
     load() {}
     pause() { this.paused = true; }
     play() { this.paused = false; return Promise.resolve(); }
 }
+class MetadataAudio extends FakeAudio {
+    readyState = 0;
+    duration = NaN;
+    playOffsets = [];
+    loadMetadata(duration = 10) { this.readyState = 1; this.duration = duration; this.onloadedmetadata?.(); }
+    play() { this.playOffsets.push(this.currentTime); return super.play(); }
+}
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('a seek waits for metadata and offsets only the first WAV in the sequence', async () => {
+    const sounds = [];
+    const player = new SpeechPlayer({ prepare: async value => ({ url: value.id, duration: 10 }),
+        audioFactory: () => { const audio = new MetadataAudio(); sounds.push(audio); return audio; } });
+    const a = item('a'), b = item('b');
+    const running = player.run([a, b], { startOffset: 2.75 });
+    await tick();
+    assert.equal(player.current, a); assert.equal(sounds[0].currentTime, 0); assert.deepEqual(sounds[0].playOffsets, []);
+    sounds[0].loadMetadata(); await tick();
+    assert.deepEqual(sounds[0].playOffsets, [2.75]); assert.equal(player.position, 2.75);
+    sounds[0].currentTime = 3.1; assert.equal(player.position, 3.1);
+    sounds[0].onended(); await tick();
+    assert.equal(player.current, b); assert.deepEqual(sounds[1].playOffsets, [0]);
+    sounds[1].onended(); await running;
+    assert.equal(player.position, 0);
+});
+
+test('a paused initial seek loads and positions the selected WAV before resume', async () => {
+    const audio = new MetadataAudio(), a = item('a');
+    const player = new SpeechPlayer({ prepare: async () => ({ url: 'a', duration: 10 }), audioFactory: () => audio,
+        update: (item, state) => { item.state = state; } });
+    const running = player.run([a], { startOffset: 4.25, startPaused: true });
+    await tick();
+    assert.equal(player.current, a); assert.equal(player.audio, audio); assert.equal(player.paused, true);
+    audio.loadMetadata(); await tick();
+    assert.equal(player.position, 4.25); assert.equal(a.state, 'paused');
+    assert.equal(audio.paused, true); assert.deepEqual(audio.playOffsets, []);
+    await player.resume();
+    assert.deepEqual(audio.playOffsets, [4.25]); assert.equal(a.state, 'playing');
+    audio.onended(); await running;
+});
+
+test('resuming before seek metadata arrives waits for the selected offset', async () => {
+    const audio = new MetadataAudio();
+    const player = new SpeechPlayer({ prepare: async () => ({ url: 'a' }), audioFactory: () => audio });
+    const running = player.run([item('a')], { startOffset: 3, startPaused: true });
+    await tick();
+    let resumed = false;
+    const resuming = player.resume().then(() => { resumed = true; });
+    await tick(); assert.equal(resumed, false); assert.deepEqual(audio.playOffsets, []);
+    audio.loadMetadata(); await resuming;
+    assert.deepEqual(audio.playOffsets, [3]);
+    audio.onended(); await running;
+});
+
+test('pausing while seek metadata loads preserves the offset and prevents playback', async () => {
+    const audio = new MetadataAudio();
+    const player = new SpeechPlayer({ prepare: async () => ({ url: 'a' }), audioFactory: () => audio });
+    const running = player.run([item('a')], { startOffset: 2 });
+    await tick(); player.pause(); audio.loadMetadata(); await tick();
+    assert.equal(player.paused, true); assert.equal(player.position, 2); assert.deepEqual(audio.playOffsets, []);
+    await player.resume(); assert.deepEqual(audio.playOffsets, [2]);
+    audio.onended(); await running;
+});
+
+test('replacing a pending seek ignores stale metadata and cancels its pending resume', async () => {
+    const sounds = [];
+    const player = new SpeechPlayer({ prepare: async value => ({ url: value.id }),
+        audioFactory: () => { const audio = new MetadataAudio(); sounds.push(audio); return audio; } });
+    const old = player.run([item('old')], { startOffset: 7, startPaused: true });
+    const oldFailure = assert.rejects(old, { name: 'AbortError' });
+    await tick();
+    const lateMetadata = sounds[0].onloadedmetadata;
+    const resumeFailure = assert.rejects(player.resume(), { name: 'AbortError' });
+    const fresh = player.run([item('fresh')], { startOffset: 1.5 });
+    await oldFailure; await resumeFailure; await tick();
+    sounds[0].loadMetadata(); lateMetadata(); await tick();
+    assert.equal(sounds[0].currentTime, 0); assert.deepEqual(sounds[0].playOffsets, []);
+    assert.equal(player.current.id, 'fresh'); assert.deepEqual(sounds[1].playOffsets, []);
+    sounds[1].loadMetadata(); await tick();
+    assert.deepEqual(sounds[1].playOffsets, [1.5]); assert.equal(player.position, 1.5);
+    sounds[1].onended(); await fresh;
+});
+
+test('seek offset is clamped to loaded media duration and immediately available metadata is used', async () => {
+    const audio = new MetadataAudio(); audio.loadMetadata(4);
+    const player = new SpeechPlayer({ prepare: async () => ({ url: 'a', duration: 8 }), audioFactory: () => audio });
+    const running = player.run([item('a')], { startOffset: 7, startPaused: true });
+    await tick();
+    assert.equal(player.position, 4); assert.deepEqual(audio.playOffsets, []);
+    const failure = assert.rejects(running, { name: 'AbortError' }); player.stop(); await failure;
+});
 test('outdated asynchronous results cannot start playback after stop', async () => {
     const pending = deferred(); let audioCreated = 0;
     const player = new SpeechPlayer({ prepare: () => pending.promise, audioFactory: () => { audioCreated++; return new FakeAudio(); } });
@@ -91,7 +183,9 @@ test('stream activation precedes preparation and segments wait for the previous 
     assert.deepEqual(events, ['wake']);
     await new Promise(r => setImmediate(r));
     assert.deepEqual(events, ['wake', 'prepare:a', 'play:a']);
-    assert.equal(player.audio, transport); await player.toggle(a); assert.equal(a.state, 'paused');
+    assert.equal(player.audio, transport);
+    transport.currentTime = 0.75; assert.equal(player.position, 0.75);
+    await player.toggle(a); assert.equal(a.state, 'paused');
     await player.toggle(a); assert.equal(a.state, 'playing');
     firstTail.resolve(); await running;
     assert.deepEqual(events, ['wake', 'prepare:a', 'play:a', 'prepare:b', 'play:b', 'dispose']);

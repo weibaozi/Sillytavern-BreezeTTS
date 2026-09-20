@@ -4,6 +4,8 @@
   "core.js",
   "dialogue-render.js",
   "extra-prompts.js",
+  "floating-controls.css",
+  "floating-controls.js",
   "index.js",
   "manifest.json",
   "menu.js",

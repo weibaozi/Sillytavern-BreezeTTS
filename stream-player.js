@@ -38,9 +38,19 @@ export class PCMStreamPlayer {
         this.maxWait = maxWait; this.maxLookAhead = maxLookAhead; this.activationWait = activationWait;
         this.sources = new Set(); this.paused = false; this.disposed = false;
         this.active = null; this.pendingPause = Promise.resolve(); this.volume = 0.8;
+        this._elapsed = 0; this._scheduled = new Map(); this._pausedPosition = 0;
     }
     get volume() { return this.gain.gain.value; }
     set volume(value) { this.gain.gain.value = Math.max(0, Math.min(1, Number(value) || 0)); }
+    get currentTime() {
+        if (this.paused) return this._pausedPosition;
+        let elapsed = this._elapsed;
+        const now = this.context.currentTime;
+        for (const { start, duration } of this._scheduled.values()) {
+            elapsed += Math.max(0, Math.min(duration, now - start));
+        }
+        return elapsed;
+    }
     // Called directly by the click handler, before any network await loses activation.
     wake(signal) {
         checkAbort(signal);
@@ -61,6 +71,7 @@ export class PCMStreamPlayer {
     }
     pause() {
         if (this.disposed) return;
+        this._pausedPosition = this.currentTime;
         this.paused = true;
         this.pendingPause = Promise.resolve(this.context.suspend()).catch(() => {});
     }
@@ -73,6 +84,8 @@ export class PCMStreamPlayer {
         this.paused = false;
     }
     stopSources() {
+        this._elapsed = this.currentTime;
+        this._scheduled.clear();
         for (const source of this.sources) {
             source.onended = null;
             try { source.stop(); } catch { /* A source may already have ended. */ }
@@ -91,6 +104,7 @@ export class PCMStreamPlayer {
         checkAbort(signal);
         if (this.disposed || this.active) throw new Error('流式播放器不可用。');
         const controller = new AbortController(); this.active = controller;
+        this._elapsed = 0; this._scheduled.clear(); this._pausedPosition = 0;
         let reader, timeoutError, serverDone = false, started = false, nextStart = 0, duration = 0;
         let finishTail;
         const tail = new Promise(resolve => { finishTail = resolve; });
@@ -134,11 +148,15 @@ export class PCMStreamPlayer {
             const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.gain);
             this.sources.add(source);
             source.onended = () => {
+                const timing = this._scheduled.get(source);
+                if (timing) { this._elapsed += timing.duration; this._scheduled.delete(source); }
                 source.disconnect(); this.sources.delete(source);
                 if (serverDone && !this.sources.size) finishTail();
             };
             const start = Math.max(this.context.currentTime + (started ? 0.02 : 0.08), nextStart);
-            nextStart = start + samples.length / rate; duration += samples.length / rate;
+            const chunkDuration = samples.length / rate;
+            nextStart = start + chunkDuration; duration += chunkDuration;
+            this._scheduled.set(source, { start, duration: chunkDuration });
             source.start(start);
             if (!started) { started = true; onStart(); }
         };

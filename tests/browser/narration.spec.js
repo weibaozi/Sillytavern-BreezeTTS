@@ -6,7 +6,7 @@ const studio = page => page.locator('#breeze-studio-host').locator('dialog');
 const field = (page, name) => studio(page).locator(`[data-${name}]`);
 const current = page => page.locator('#chat .mes').last();
 const bubbles = page => current(page).locator('.breeze-bubble');
-const tray = page => current(page).locator('.breeze-message-play').first();
+const playMessage = page => page.locator('#breeze-floating-controls').locator('.breeze-message-play');
 const state = async request => (await request.get('/__demo/state')).json();
 const requests = async request => (await state(request)).requests;
 const speech = (name, text, emotion = 'happy') => `[TTSVoice:${name}:${emotion}:${text}]`;
@@ -45,14 +45,11 @@ async function replaceMessage(page, raw) {
     await page.evaluate(raw => {
         const demo = window.__breezeDemo;
         const id = demo.context.chat.length - 1;
-        for (const tray of document.querySelectorAll(`.mes[mesid="${id}"] .breeze-tray`)) tray.dataset.fixtureStale = 'true';
         demo.context.chat[id].mes = raw;
         document.querySelector(`.mes[mesid="${id}"] .mes_text`).textContent = raw;
         demo.emit('MESSAGE_UPDATED', id);
     }, raw);
-    // MESSAGE_UPDATED schedules a redraw. Do not click the preceding message's
-    // still-mounted tray during that debounce window.
-    await expect(current(page).locator('.breeze-tray[data-fixture-stale]')).toHaveCount(0);
+    await expect(bubbles(page)).toHaveCount(raw.split('[TTSVoice:').length - 1);
 }
 
 const begin = page => page.evaluate(() => window.__breezeDemo.beginStream());
@@ -168,13 +165,13 @@ test('play message reads untagged quotations as narration while retaining tagged
     ].join('\n\n');
     await replaceMessage(page, raw);
     await expect(bubbles(page)).toHaveCount(2);
-    await expect(tray(page)).toBeVisible();
+    await expect(playMessage(page)).toBeVisible();
     // Narration remains in the host prose; only dialogue gets quote styling.
     await expect(current(page).locator('.breeze-dialogue')).toHaveCount(2);
     for (const quote of await current(page).locator('.breeze-dialogue').allTextContents()) {
         expect(quote).not.toMatch(/阳光照进教室|她合上课本|两人走向门口/);
     }
-    await tray(page).click();
+    await playMessage(page).click();
     await expect.poll(async () => (await requests(request)).length).toBe(5);
     expect((await requests(request)).map(job => [job.text, job.voice_id, job.emotion])).toEqual([
         ['阳光照进教室。 “先去吃饭吧。”', narratorVoice, '平静地讲述，语速稍慢'],
@@ -199,14 +196,14 @@ test('one dialogue bubble speaks only that line even when its message has an ena
 test('a narration-only message defaults to cloning its reference without emotion and can be disabled', async ({ page, request }) => {
     await setNarrator(page);
     await replaceMessage(page, '午后的教室安静下来。');
-    await expect(tray(page)).toBeVisible();
+    await expect(playMessage(page)).toBeVisible();
     await expect(bubbles(page)).toHaveCount(0);
     await expect(current(page).locator('.breeze-dialogue')).toHaveCount(0);
-    await tray(page).click();
+    await playMessage(page).click();
     await expect.poll(async () => (await requests(request)).length).toBe(1);
     expect((await requests(request))[0]).toMatchObject({ text: '午后的教室安静下来。', voice_id: narratorVoice, speech_mode: 'clone', emotion: '', cfg_scale: 1 });
     await setNarrator(page, '');
-    await expect(current(page).locator('.breeze-message-play')).toHaveCount(0);
+    await expect(page.locator('#breeze-floating-controls')).toBeHidden();
     await expect(current(page).locator('.mes_text')).toHaveText('午后的教室安静下来。');
 });
 
@@ -220,7 +217,7 @@ test('switching narrator modes preserves emotion but generates separate narratio
     await expect.poll(() => narrator(page)).toEqual({ voiceId: narratorVoice, mode: 'clone', targetChars: 100, emotion: '温柔沉静，像在讲一个故事' });
     await field(page, 'close').click();
     await replaceMessage(page, '阳光照进教室。\n' + speech('周启明', '我来带路。', 'softly reassuring'));
-    await tray(page).click();
+    await playMessage(page).click();
     await expect.poll(async () => (await requests(request)).length).toBe(2);
     await expect(bubbles(page)).toHaveAttribute('data-state', 'ready');
     const first = await requests(request);
@@ -233,7 +230,7 @@ test('switching narrator modes preserves emotion but generates separate narratio
     await expect(field(page, 'narrator-emotion')).toBeEnabled();
     await expect(field(page, 'narrator-emotion')).toHaveValue('温柔沉静，像在讲一个故事');
     await field(page, 'close').click();
-    await tray(page).click();
+    await playMessage(page).click();
     await expect.poll(async () => (await requests(request)).length).toBe(3);
     await expect(bubbles(page)).toHaveAttribute('data-state', 'ready');
     const switched = await requests(request);
@@ -258,7 +255,7 @@ test('older chats default to clone while retaining their saved narration emotion
     await expect(field(page, 'narrator-emotion')).toBeDisabled();
     await field(page, 'close').click();
     await replaceMessage(page, '旧聊天的旁白。');
-    await tray(page).click();
+    await playMessage(page).click();
     await expect.poll(async () => (await requests(request)).length).toBe(1);
     expect((await requests(request))[0]).toMatchObject({ speech_mode: 'clone', emotion: '', cfg_scale: 1 });
 });
@@ -269,7 +266,7 @@ test('clone narration on an older backend requests an update instead of silently
     await page.reload();
     await expect(page.locator('#chat .breeze-bubble').first()).toHaveAttribute('data-state', 'idle');
     await replaceMessage(page, '这段旁白需要克隆模式。');
-    await tray(page).click();
+    await playMessage(page).click();
     await openStudio(page);
     await expect(field(page, 'status')).toContainText(/更新.*重启|重启.*更新/);
     expect(await requests(request)).toEqual([]);
@@ -341,7 +338,7 @@ for (const streamingText of [false, true]) {
         const previous = '他走到窗前，';
         const continuation = '向操场望去。\n' + speech('周启明', '他们已经开始了。');
         await replaceMessage(page, previous);
-        await expect(tray(page)).toBeVisible();
+        await expect(playMessage(page)).toBeVisible();
         if (streamingText) {
             await page.evaluate(() => window.__breezeDemo.beginStream({ type: 'continue' }));
             await progress(page, continuation);
@@ -362,7 +359,7 @@ for (const streamingText of [false, true]) {
         expect((await requests(request)).map(job => job.text)).toEqual(['向操场望去。', '他们已经开始了。']);
         expect(await page.evaluate(() => window.__breezeDemo.context.chat.at(-1).mes)).toBe(previous + continuation);
         // A later manual replay still includes the complete narration.
-        await tray(page).click();
+        await playMessage(page).click();
         await expect.poll(async () => (await requests(request)).length).toBe(3);
         expect((await requests(request))[2].text).toBe(previous + '向操场望去。');
     });

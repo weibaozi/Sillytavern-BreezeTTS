@@ -8,6 +8,7 @@ import { displayDialogue, hasLegacyDialogue } from './dialogue-render.js';
 import { parseNarration, normalizeNarrationTargetChars } from './narration.js';
 import { createStudioPanel } from './panel.js';
 import { mountStudioEntry } from './menu.js';
+import { createFloatingControls } from './floating-controls.js';
 
 const context = () => window.SillyTavern.getContext();
 const el = (tag, text, cls) => { const node = document.createElement(tag); if (text != null) node.textContent = text; if (cls) node.className = cls; return node; };
@@ -21,6 +22,8 @@ let injectionType = null;
 let serviceState = 'offline', supportsStreaming = false, supportsCloning = false, previewAudio, previewButton;
 const memory = new Map();
 const DEFAULT_NARRATOR_EMOTION = '平稳口气，配音';
+let floatingControls, floatingChat = null, selectedPlaybackMessage = null, progressTimer;
+let playbackCursor = null, playbackFeedback = null;
 
 function narratorConfig(data = meta()) {
     const saved = data.narrator || {};
@@ -163,7 +166,11 @@ function valid(item) {
 }
 function update(item, state, error = '', duration) {
     if (!valid(item)) return;
+    const previousState = item.state;
     Object.assign(item, { state, error }); if (duration != null) item.duration = duration;
+    if (state === 'ready' && ['playing', 'paused'].includes(previousState)) {
+        playbackCursor = { messageId: item.messageId, itemId: item.id, offset: Number(item.duration) || 0 };
+    }
     const labels = { idle: '▶', queued: '排队', running: '生成中', ready: '▶', playing: '暂停', paused: '继续', error: '重试', unmapped: '未映射' };
     for (const button of document.querySelectorAll('.breeze-bubble')) {
         if (button.dataset.item !== item.id) continue;
@@ -172,6 +179,7 @@ function update(item, state, error = '', duration) {
         button.title = error || `${item.segment.emotion}：${item.segment.text}`;
         button.setAttribute('aria-label', `${button.textContent} ${error || item.segment.text}`);
     }
+    if (!rendering) refreshPlaybackControls();
 }
 async function prepare(item, signal, { stream = false, force = false } = {}) {
     checkAbort(signal);
@@ -236,52 +244,139 @@ function stopPlayback() {
     const previous = regeneration; regeneration = null;
     previous?.controller.abort();
     automaticQueue.stop();
+    playbackCursor = null;
     for (const item of items.values()) if (['playing', 'paused', 'queued', 'running'].includes(item.state)) update(item, 'idle');
     refreshPlaybackControls();
 }
 function refreshPlaybackControls() {
-    const active = player.activeItems || [];
-    for (const controls of document.querySelectorAll('.breeze-message-controls')) {
-        const messageId = Number(controls.dataset.messageId);
-        const ownsPlayback = player.active && active.some(item => item.messageId === messageId)
-            || player.paused && automaticQueue.activeItems.some(item => item.messageId === messageId);
-        const refreshTask = regeneration?.messageId === messageId ? regeneration : null;
-        const refreshing = refreshTask && !refreshTask.done;
-        const pause = controls.querySelector('.breeze-message-pause'), stop = controls.querySelector('.breeze-message-stop');
-        if (pause) {
-            pause.disabled = !ownsPlayback;
-            pause.textContent = ownsPlayback && player.paused ? '▶ 继续' : '⏸ 暂停';
-            pause.setAttribute('aria-pressed', String(Boolean(ownsPlayback && player.paused)));
-            pause.title = ownsPlayback && player.paused ? '从暂停处继续播放' : '暂停本条语音队列';
-        }
-        if (stop) stop.disabled = !ownsPlayback && !refreshing;
-        const refresh = controls.querySelector('.breeze-message-refresh');
-        if (refresh) {
-            const live = generation && liveMessageIds.has(messageId);
-            refresh.disabled = Boolean(refreshing || live);
-            refresh.textContent = refreshing ? `↻ 重新获取中 ${refreshTask.completed}/${refreshTask.items.length}` : '↻ 重新获取';
-            refresh.title = live ? '等待正文生成完成后重新获取全部语音' : '清除本条语音缓存并重新合成对白与旁白，完成后点击播放';
-        }
-        const feedback = controls.querySelector('.breeze-message-feedback');
-        if (feedback) feedback.textContent = refreshTask?.done
-            ? refreshTask.failed ? `已完成，${refreshTask.failed} 段失败，可重新获取重试。` : `已重新获取 ${refreshTask.completed} 段语音。` : '';
-        controls.dataset.state = refreshing ? 'refreshing' : ownsPlayback ? player.paused ? 'paused' : 'playing' : 'idle';
+    if (!floatingControls || !settings) return;
+    const ctx = context(), key = chatKey(ctx);
+    if (floatingChat !== key) {
+        floatingChat = key; selectedPlaybackMessage = null; playbackCursor = null; playbackFeedback = null;
     }
+    const grouped = new Map();
+    for (const item of items.values()) {
+        if (!valid(item)) continue;
+        if (!grouped.has(item.messageId)) grouped.set(item.messageId, []);
+        grouped.get(item.messageId).push(item);
+    }
+    if (generation) for (const id of liveMessageIds) {
+        const message = ctx.chat[id];
+        if (message && !message.is_user && !message.is_system && !grouped.has(id)) grouped.set(id, []);
+    }
+    const ids = [...grouped.keys()].sort((a, b) => a - b);
+    if (selectedPlaybackMessage != null && !grouped.has(selectedPlaybackMessage)) selectedPlaybackMessage = null;
+    const activeItem = player.current || player.activeItems[0] || (player.paused ? automaticQueue.activeItems[0] : null);
+    const preparing = regeneration && !regeneration.done;
+    const messageId = preparing ? regeneration.messageId : activeItem?.messageId
+        ?? selectedPlaybackMessage ?? ids.at(-1) ?? null;
+    const entries = (grouped.get(messageId) || []).filter(item => itemVoice(item)).sort((a, b) => a.segment.start - b.segment.start);
+    const ownsPlayback = Boolean(activeItem?.messageId === messageId && (player.active || player.paused));
+    const task = regeneration?.messageId === messageId ? regeneration : null;
+    const refreshing = Boolean(task && !task.done), live = generation && liveMessageIds.has(messageId);
+    if (player.current && valid(player.current)
+        && !(player.audio?.readyState === 0 && playbackCursor?.itemId === player.current.id && playbackCursor.offset > 0)) {
+        playbackCursor = { messageId: player.current.messageId, itemId: player.current.id, offset: player.position || 0 };
+    }
+    const timeline = messageTimeline(entries);
+    const cursorIndex = playbackCursor?.messageId === messageId ? entries.findIndex(item => item.id === playbackCursor.itemId) : -1;
+    const offset = cursorIndex < 0 ? 0 : Math.min(timeline.durations[cursorIndex] || Infinity, Math.max(0, playbackCursor.offset));
+    const elapsed = cursorIndex < 0 ? 0 : timeline.durations.slice(0, cursorIndex).reduce((a, b) => a + b, 0) + offset;
+    const percent = timeline.ready ? Math.min(100, elapsed / timeline.total * 100)
+        : cursorIndex < 0 ? 0 : (cursorIndex + (timeline.durations[cursorIndex] ? offset / timeline.durations[cursorIndex] : 0)) / entries.length * 100;
+    let feedback = playbackFeedback?.messageId === messageId ? playbackFeedback.text : '';
+    if (task?.done) feedback = task.failed ? `已完成，${task.failed} 段失败，可重新获取重试。`
+        : `已重新获取 ${task.completed} 段语音。`;
+    const label = messageId == null ? '尚无可朗读的回复' : `第 ${messageId + 1} 条消息 · ${ctx.chat[messageId]?.name || ctx.name2 || '回复'}`;
+    floatingControls.update({
+        visible: Boolean(settings.enabled && key && ids.length),
+        messages: ids.map(id => ({ id, label: `第 ${id + 1} 条 · ${String(grouped.get(id)[0]?.segment.text || '正在生成…').slice(0, 32)}` })),
+        selectedMessageId: selectedPlaybackMessage, messageId, label,
+        status: refreshing ? task.kind === 'seek' ? '准备完整音频' : '重新获取中'
+            : ownsPlayback ? player.paused ? '已暂停' : '播放中' : live ? '文字生成中' : entries.length ? '待播放' : '待绑定音色',
+        paused: ownsPlayback && player.paused, active: ownsPlayback, refreshing,
+        refreshLabel: refreshing ? `${task.kind === 'seek' ? '准备音频' : '↻ 重新获取中'} ${task.completed}/${task.items.length}` : '↻ 重新获取',
+        feedback, canPlay: messageId != null, canPause: ownsPlayback && player.active,
+        canStop: ownsPlayback || refreshing, canRefresh: messageId != null && !live && !refreshing,
+        selectionLocked: ownsPlayback || refreshing,
+        timeline: { enabled: Boolean(entries.length && !live && !refreshing), percent,
+            currentLabel: formatPlaybackTime(elapsed), totalLabel: timeline.ready ? formatPlaybackTime(timeline.total) : '待准备',
+            hint: live ? '文字生成完成后可拖动进度' : refreshing ? '正在准备音频…'
+                : !entries.length ? '先为角色或旁白绑定音色' : timeline.ready ? '拖动可定位到整条回复的任意位置'
+                    : '拖动后先准备完整音频，再从所选位置播放' },
+    });
+    if (player.active && progressTimer == null) progressTimer = window.setInterval(refreshPlaybackControls, 200);
+    else if (!player.active && progressTimer != null) { window.clearInterval(progressTimer); progressTimer = null; }
 }
-async function refreshMessageAudio(messageId) {
+function formatPlaybackTime(seconds) {
+    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+    return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
+}
+function messageTimeline(entries) {
+    const saved = meta().cache;
+    const durations = entries.map(item => {
+        const id = itemVoice(item);
+        const key = id && cacheKey(client.base, requestFor(item.segment, id, settings));
+        const cached = key && memory.get(key);
+        const value = Number(cached?.duration ?? (saved[key]?.id ? item.duration : undefined));
+        return Number.isFinite(value) && value > 0 ? value : 0;
+    });
+    return { durations, total: durations.reduce((a, b) => a + b, 0), ready: durations.length > 0 && durations.every(value => value > 0) };
+}
+function currentMessageItems(messageId) {
+    if (!settings.enabled || floatingChat !== chatKey(context()) || !Number.isInteger(messageId)) return [];
+    render(messageId);
+    return [...items.values()].filter(item => item.messageId === messageId && valid(item) && itemVoice(item))
+        .sort((a, b) => a.segment.start - b.segment.start);
+}
+function playbackError(error, messageId) {
+    if (error.name === 'AbortError') return;
+    playbackFeedback = { messageId, text: error.message }; notice(error.message); refreshPlaybackControls();
+}
+function playMessage(messageId) {
+    const selected = currentMessageItems(messageId);
+    if (!selected.length) { openPanel('characters'); return; }
+    stopPlayback(); allowAutomatic = false; autoPending.clear(); playbackFeedback = null;
+    player.volume = Number(settings.volume);
+    stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
+    void player.run(selected, { stream: settings.streaming }).catch(error => playbackError(error, messageId));
+}
+function playFromTimeline(selected, percent, paused) {
+    const timeline = messageTimeline(selected), messageId = selected[0].messageId;
+    if (!timeline.ready) throw new Error('音频时长尚不可用，请重新获取后重试。');
+    const seconds = Math.min(100, Math.max(0, percent)) / 100 * timeline.total;
+    let index = 0, offset = seconds;
+    while (index < selected.length - 1 && offset >= timeline.durations[index]) offset -= timeline.durations[index++];
+    playbackCursor = { messageId, itemId: selected[index].id, offset };
+    if (seconds >= timeline.total) { refreshPlaybackControls(); return; }
+    player.volume = Number(settings.volume);
+    void player.run(selected.slice(index), { stream: false, startOffset: offset, startPaused: paused })
+        .catch(error => playbackError(error, messageId));
+}
+function seekMessage(percent, messageId) {
+    if (!Number.isFinite(percent) || generation && liveMessageIds.has(messageId) || regeneration && !regeneration.done) return;
+    const selected = currentMessageItems(messageId);
+    if (!selected.length) return;
+    const paused = player.paused;
+    if (!messageTimeline(selected).ready) { void refreshMessageAudio(messageId, { force: false, seekPercent: percent, startPaused: paused }); return; }
+    stopPlayback(); allowAutomatic = false; autoPending.clear(); playbackFeedback = null;
+    stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
+    try { playFromTimeline(selected, percent, paused); } catch (error) { playbackError(error, messageId); }
+}
+async function refreshMessageAudio(messageId, { force = true, seekPercent = null, startPaused = false } = {}) {
     if (!settings.enabled || generation && liveMessageIds.has(messageId)) return;
     // Resolve current entries at click time so a redraw never reuses stale fragments.
-    const selected = [...items.values()].filter(item => item.messageId === messageId && valid(item) && itemVoice(item))
-        .sort((a, b) => a.segment.start - b.segment.start);
+    const selected = currentMessageItems(messageId);
     if (!selected.length) { openPanel('characters'); return; }
     stopPlayback(); allowAutomatic = false; autoPending.clear();
     stopPreview(); dialog?.querySelectorAll('audio').forEach(audio => audio.pause());
-    const task = { controller: new AbortController(), messageId, items: selected, completed: 0, failed: 0, done: false };
+    playbackFeedback = null;
+    const task = { controller: new AbortController(), messageId, items: selected, completed: 0, failed: 0, done: false, kind: force ? 'refresh' : 'seek' };
     regeneration = task;
     const data = meta(true);
     for (const item of selected) {
         const key = cacheKey(client.base, requestFor(item.segment, itemVoice(item), settings));
-        memory.delete(key); delete data.cache[key]; delete item.duration;
+        if (force) { memory.delete(key); delete data.cache[key]; delete item.duration; }
         update(item, 'queued');
     }
     context().chatMetadata[KEY] = data; void saveMeta();
@@ -289,7 +384,7 @@ async function refreshMessageAudio(messageId) {
     try {
         for (const item of selected) {
             checkAbort(task.controller.signal);
-            try { await prepare(item, task.controller.signal, { force: true }); }
+            try { await prepare(item, task.controller.signal, { force }); }
             catch (error) {
                 checkAbort(task.controller.signal);
                 task.failed++; update(item, 'error', error.message);
@@ -298,7 +393,14 @@ async function refreshMessageAudio(messageId) {
         }
     } catch (error) { if (error.name !== 'AbortError') notice(error.message); }
     finally {
-        if (regeneration === task) { task.done = true; refreshPlaybackControls(); }
+        if (regeneration === task) {
+            task.done = true;
+            if (seekPercent != null && !task.failed && !task.controller.signal.aborted) {
+                regeneration = null;
+                try { playFromTimeline(selected, seekPercent, startPaused); } catch (error) { playbackError(error, messageId); }
+            }
+            refreshPlaybackControls();
+        }
     }
 }
 function invalidate() {
@@ -375,31 +477,6 @@ function insertBubbles(container, messageItems, pending = []) {
         range.deleteContents(); range.insertNode(wrapper);
     }
     const tray = el('div', null, 'breeze-tray');
-    const controls = el('div', null, 'breeze-message-controls');
-    controls.dataset.messageId = container.getAttribute('mesid');
-    controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', '本条语音播放控制');
-    const all = el('button', '▶ 播放本条', 'breeze-control breeze-message-play'); all.type = 'button';
-    all.title = '按正文顺序从头播放对白与已启用的旁白';
-    all.addEventListener('click', () => {
-        const eligible = messageItems.filter(item => itemVoice(item));
-        if (!eligible.length) return openPanel('characters');
-        stopPlayback(); allowAutomatic = false; autoPending.clear();
-        player.volume = Number(settings.volume);
-        stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
-        void player.run(eligible, { stream: settings.streaming }).catch(e => { if (e.name !== 'AbortError') notice(e.message); });
-    });
-    const pause = el('button', '⏸ 暂停', 'breeze-control breeze-message-pause'); pause.type = 'button'; pause.disabled = true;
-    pause.setAttribute('aria-pressed', 'false');
-    pause.addEventListener('click', () => {
-        void player.togglePause().catch(error => { if (error.name !== 'AbortError') notice(error.message); });
-    });
-    const stop = el('button', '■ 停止', 'breeze-control breeze-message-stop'); stop.type = 'button'; stop.disabled = true;
-    stop.title = '结束播放并清空当前语音队列';
-    stop.addEventListener('click', () => { allowAutomatic = false; autoPending.clear(); stopPlayback(); });
-    const refresh = el('button', '↻ 重新获取', 'breeze-control breeze-message-refresh'); refresh.type = 'button';
-    refresh.addEventListener('click', () => { void refreshMessageAudio(Number(controls.dataset.messageId)); });
-    const feedback = el('span', '', 'breeze-message-feedback'); feedback.setAttribute('role', 'status');
-    if (messageItems.length) { controls.append(all, pause, stop, refresh, feedback); tray.append(controls); }
     for (const item of fallback) {
         const row = el('div', null, 'breeze-fallback');
         if (!settings.hideTags) row.append(el('span', item.segment.raw, 'breeze-original'));
@@ -908,6 +985,16 @@ function init() {
     if (typeof settings.tagRenderPromptTemplate !== 'string' || upgradeVocalEvents) saveSettings();
     try { client = new BreezeClient(settings.baseUrl); } catch { settings.baseUrl = DEFAULTS.baseUrl; client = new BreezeClient(settings.baseUrl); }
     buildPanel();
+    floatingControls = createFloatingControls({
+        collapsed: settings.floatingControlsCollapsed === true,
+        onPlay: playMessage,
+        onPause: messageId => { void player.togglePause().catch(error => playbackError(error, messageId)); },
+        onStop: () => { allowAutomatic = false; autoPending.clear(); playbackFeedback = null; stopPlayback(); },
+        onRefresh: messageId => { void refreshMessageAudio(messageId); },
+        onSeek: seekMessage,
+        onSelect: messageId => { selectedPlaybackMessage = messageId; playbackFeedback = null; refreshPlaybackControls(); },
+        onCollapse: collapsed => { settings.floatingControlsCollapsed = collapsed; saveSettings(); },
+    });
     mountStudioEntry(openPanel);
     const on = (name, fn) => { if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name], fn); };
     on('GENERATION_STARTED', (_type, _options, dryRun) => {
