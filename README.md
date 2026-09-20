@@ -1,4 +1,4 @@
-# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.10
+# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.11
 
 模型只写一份 `[TTSVoice:角色名:情绪:对白]`，插件在显示层把它呈现为普通引号对白和播放气泡。原始聊天 `mes` 保持不变，已绑定角色连接原 Breeze WebUI 合成及播放；未绑定角色仍显示对白，仅跳过语音。原有独立工作室、音色库、流式播放、语气词设置和共享语料库保留。
 
@@ -29,7 +29,7 @@
 
 ### 手动安装与开发目录
 
-也可以执行 `python tools/package.py` 生成 `dist/sillytavern-breeze-0.7.0-tag-render.10.zip`，解压到酒馆用户的 `extensions/` 下；或在 Windows 从源码目录运行：
+也可以执行 `python tools/package.py` 生成 `dist/sillytavern-breeze-0.7.0-tag-render.11.zip`，解压到酒馆用户的 `extensions/` 下；或在 Windows 从源码目录运行：
 
 ```powershell
 .\install.ps1 -SillyTavernPath 'C:\path\to\SillyTavern' -InstallExperimental
@@ -122,6 +122,8 @@
 - 消息内新角色「就地绑定／跳过」和可配置语气词预设组仍在计划中。自动 prompt 注入已实现。
 
 ## 验证状态
+
+0.7.0-tag-render.11：默认预设最后的示例人物改为 Bob；已保存的原版默认模板自动更新，自定义模板保持不变。
 
 0.7.0-tag-render.10：新增可展开／收起的浮动面板、回复选择与整条语音进度条。文字生成结束后可拖动定位，缺少音频时先补齐，暂停拖动保持暂停。
 

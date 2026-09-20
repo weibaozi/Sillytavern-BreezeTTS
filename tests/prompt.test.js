@@ -72,7 +72,7 @@ test('experimental default uses one speech copy while retaining historic templat
     assert.match(text, /penultimate and final utterances/);
     assert.doesNotMatch(text, /MUST contain BOTH copies|Never output speech only inside a TTS tag/);
     assert.equal(text.split('等一下。现在可以了。').length - 1, 1);
-    assert.ok(text.includes('周启明抬起手。\n[TTSVoice:周启明:softly reassuring:[笑]等一下。现在可以了。]\n他合上本子。'));
+    assert.ok(text.includes('Bob抬起手。\n[TTSVoice:Bob:softly reassuring:[笑]等一下。现在可以了。]\n他合上本子。'));
     assert.match(STABLE_DEFAULT_TEMPLATE, /MUST contain BOTH copies/);
     assert.match(STABLE_DEFAULT_TEMPLATE, /hiding all TTS tags must leave the story and every spoken line readable/);
     assert.match(PREVIOUS_DEFAULT_TEMPLATE, /Immediately after EVERY eligible spoken paragraph/);
@@ -124,7 +124,7 @@ test('malformed or macro-like event labels are reported and omitted from the pro
 test('changing event list updates both rule and example without keeping an old event', () => {
     const text = buildVoicePrompt(context(), settings({ vocalEvents: '[吸气]\n低笑' }), voices);
     assert.match(text, /allowed audible events at the intended position: \[吸气\], \[低笑\]/);
-    assert.ok(text.includes('[TTSVoice:周启明:softly reassuring:[吸气]等一下。现在可以了。]'));
+    assert.ok(text.includes('[TTSVoice:Bob:softly reassuring:[吸气]等一下。现在可以了。]'));
     for (const event of expectedEvents.filter(event => event !== '[吸气]')) assert.ok(!text.includes(event), event);
     assert.ok(LEGACY_DEFAULT_TEMPLATE.includes('[TTSVoice:周启明:happy:[笑]等一下。现在可以了。]'));
     assert.ok(!LEGACY_DEFAULT_TEMPLATE.includes('{{vocal_event_example}}'));
@@ -133,7 +133,7 @@ test('changing event list updates both rule and example without keeping an old e
 test('parenthesized event lists update the rule and example without becoming square-bracket events', () => {
     const text = buildVoicePrompt(context(), settings({ vocalEvents: '(clears throat)[whimper][needy moan]' }), voices);
     assert.match(text, /allowed audible events at the intended position: \(clears throat\), \[whimper\], \[needy moan\]/);
-    assert.ok(text.includes('[TTSVoice:周启明:softly reassuring:(clears throat)等一下。现在可以了。]'));
+    assert.ok(text.includes('[TTSVoice:Bob:softly reassuring:(clears throat)等一下。现在可以了。]'));
     assert.ok(!text.includes('[笑]'));
     assert.ok(!text.includes('[clears throat]'));
 });
@@ -142,7 +142,7 @@ test('explicitly empty or wholly invalid event list disables events instead of r
     for (const vocalEvents of ['', ' \n ', '[[笑]]\n{{char}}']) {
         const text = buildVoicePrompt(context(), settings({ vocalEvents }), voices);
         assert.match(text, /allowed audible events at the intended position: None/);
-        assert.ok(text.includes('[TTSVoice:周启明:softly reassuring:等一下。现在可以了。]'));
+        assert.ok(text.includes('[TTSVoice:Bob:softly reassuring:等一下。现在可以了。]'));
         for (const event of parseVocalEvents(DEFAULT_VOCAL_EVENTS).events) assert.ok(!text.includes(event), event);
     }
 });

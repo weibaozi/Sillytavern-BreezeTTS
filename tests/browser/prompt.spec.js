@@ -65,7 +65,7 @@ test('vocal-event list starts with 47 defaults and updates both preview and inje
     let preview = await field(page, 'prompt-preview').inputValue();
     expect(preview).not.toContain('[笑]');
     expect(preview).not.toContain('[叹气]');
-    expect(preview).toContain('[TTSVoice:周启明:softly reassuring:[喘气]');
+    expect(preview).toContain('[TTSVoice:Bob:softly reassuring:[喘气]');
     expect(await injected(page)).toBe(preview);
     expect(await page.evaluate(() => window.__breezeDemo.context.extensionSettings.breeze_voice.vocalEvents)).toBe('[喘气]\n[轻笑]');
     await expect(field(page, 'prompt-template')).toHaveValue(template);
@@ -81,7 +81,7 @@ test('vocal-event list starts with 47 defaults and updates both preview and inje
     expect(await injected(page)).toContain('(clears throat)');
     expect(await injected(page)).toContain('(throaty hum)');
     expect(await injected(page)).not.toContain('[throaty hum]');
-    expect(await injected(page)).toContain('[TTSVoice:周启明:softly reassuring:[笑]');
+    expect(await injected(page)).toContain('[TTSVoice:Bob:softly reassuring:[笑]');
     expect(await injected(page)).toBe(await field(page, 'prompt-preview').inputValue());
     expect(errors).toEqual([]);
 });
@@ -92,7 +92,7 @@ test('parenthesized and adjacent vocal events reach the live prompt unchanged wh
     await expect.poll(() => injected(page)).toContain('(clears throat), [whimper], [needy moan], (gasp)');
     const preview = await field(page, 'prompt-preview').inputValue();
     expect(await injected(page)).toBe(preview);
-    expect(preview).toContain('[TTSVoice:周启明:softly reassuring:(clears throat)');
+    expect(preview).toContain('[TTSVoice:Bob:softly reassuring:(clears throat)');
     expect(preview).not.toContain('[clears throat]');
     for (const invalid of ['[wrong)', '[(nested)]', '{{char}}', '[笑]']) expect(preview).not.toContain(invalid);
     await expect(field(page, 'vocal-events')).toHaveAttribute('aria-invalid', 'true');
@@ -137,7 +137,7 @@ for (const [label, oldValue, expectedValue] of [
         expect(await injected(page)).toBe(await field(page, 'prompt-preview').inputValue());
         if (expectedValue === '') {
             expect(await injected(page)).toContain('allowed audible events at the intended position: None');
-            expect(await injected(page)).toContain('[TTSVoice:周启明:softly reassuring:等一下。现在可以了。]');
+            expect(await injected(page)).toContain('[TTSVoice:Bob:softly reassuring:等一下。现在可以了。]');
         }
     });
 }

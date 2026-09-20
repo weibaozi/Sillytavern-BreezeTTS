@@ -2,7 +2,7 @@ import { KEY, DEFAULTS, parseTTS, parseStreamingTTS, chatKey, discoverSpeakers, 
 import { BreezeClient, checkAbort } from './client.js';
 import { SpeechPlayer } from './player.js';
 import { AutomaticSpeechQueue } from './automatic-queue.js';
-import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, LEGACY_VOCAL_EVENTS, PREVIOUS_DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
+import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, PREVIOUS_TAG_RENDER_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, LEGACY_VOCAL_EVENTS, PREVIOUS_DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
 import { listExtraPresets, createExtraPreset, updateExtraPreset, deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from './extra-prompts.js';
 import { displayDialogue, hasLegacyDialogue } from './dialogue-render.js';
 import { parseNarration, normalizeNarrationTargetChars } from './narration.js';
@@ -977,12 +977,14 @@ function recordStreamingMessage() {
 function init() {
     const ctx = context();
     settings = { ...DEFAULTS, ...PROMPT_DEFAULTS, ...ctx.extensionSettings[KEY] };
-    settings.promptTemplate = typeof settings.tagRenderPromptTemplate === 'string' ? settings.tagRenderPromptTemplate : DEFAULT_TEMPLATE;
+    const upgradePrompt = typeof settings.tagRenderPromptTemplate !== 'string'
+        || settings.tagRenderPromptTemplate === PREVIOUS_TAG_RENDER_TEMPLATE;
+    settings.promptTemplate = upgradePrompt ? DEFAULT_TEMPLATE : settings.tagRenderPromptTemplate;
     // The stable template is retained verbatim; only this branch's field is initialized.
     const upgradeVocalEvents = typeof settings.vocalEvents !== 'string'
         || settings.vocalEvents === LEGACY_VOCAL_EVENTS || settings.vocalEvents === PREVIOUS_DEFAULT_VOCAL_EVENTS;
     if (upgradeVocalEvents) settings.vocalEvents = DEFAULT_VOCAL_EVENTS;
-    if (typeof settings.tagRenderPromptTemplate !== 'string' || upgradeVocalEvents) saveSettings();
+    if (upgradePrompt || upgradeVocalEvents) saveSettings();
     try { client = new BreezeClient(settings.baseUrl); } catch { settings.baseUrl = DEFAULTS.baseUrl; client = new BreezeClient(settings.baseUrl); }
     buildPanel();
     floatingControls = createFloatingControls({

@@ -84,9 +84,14 @@ For bound characters, choose the word or short phrase that best fits their perso
 5. Use the exact prefix TTSVoice. Names and emotions contain no colons, square brackets, or line breaks. Inside the dialogue field, write only spoken words and allowed audible events: no outer quotation marks, Markdown, or narration. Preserve normal punctuation. Close every inner event bracket before the outer TTSVoice bracket; each complete tag occupies one line, without bold or code fences. Complete each utterance's tag once before continuing. Short replies, consecutive remarks, questions, and closing lines all follow this rule. Before any post-body module, silently check that each eligible utterance has exactly one tag, especially the penultimate and final utterances. No prose copies, duplicate tags, repeated passages, or appended correction transcripts. Do not print the check.
 
 Example (a bound speaker):
-周启明抬起手。
-[TTSVoice:周启明:softly reassuring:{{vocal_event_example}}等一下。现在可以了。]
+Bob抬起手。
+[TTSVoice:Bob:softly reassuring:{{vocal_event_example}}等一下。现在可以了。]
 他合上本子。`;
+
+// Recognize the previous stock template without overwriting user-edited protocols.
+export const PREVIOUS_TAG_RENDER_TEMPLATE = DEFAULT_TEMPLATE
+    .replace('Bob抬起手。', '周启明抬起手。')
+    .replace('[TTSVoice:Bob:softly reassuring:', '[TTSVoice:周启明:softly reassuring:');
 
 export const PROMPT_DEFAULTS = Object.freeze({
     injectPrompt: true, promptDepth: 1, promptTemplate: DEFAULT_TEMPLATE, vocalEvents: DEFAULT_VOCAL_EVENTS,
