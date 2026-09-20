@@ -1,4 +1,4 @@
-# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.4（实验分支）
+# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.5（实验分支）
 
 模型只写一份 `[TTSVoice:角色名:情绪:对白]`，插件在显示层把它呈现为普通引号对白和播放气泡。原始聊天 `mes` 保持不变，已绑定角色连接原 Breeze WebUI 合成及播放；未绑定角色仍显示对白，仅跳过语音。原有独立工作室、音色库、流式播放、语气词设置和共享语料库保留。
 
@@ -6,7 +6,7 @@
 
 ## 两个工作区
 
-- **TTS**：仍在 `G:\study\AI\breeze-tts`，打开该目录的 `TTS.code-workspace`。后端代码位于该目录下的 `breeze_infer/voice_service.py`，接入原 `webui.py` 和 `breeze_infer/api.py`，共用已加载模型及推理锁。本实验不更改后端。
+- **TTS**：仍在 `G:\study\AI\breeze-tts`，打开该目录的 `TTS.code-workspace`。后端代码位于该目录下的 `breeze_infer/voice_service.py`，接入原 `webui.py` 和 `breeze_infer/api.py`，共用已加载模型及推理锁。0.7.0-tag-render.5 同时增加后端纯克隆支持，应用后需重启后端。
 - **稳定插件**：`G:\study\AI\breeze-tts\sillytavern-breeze`，保留 0.6.1。
 - **实验插件**：本目录 `G:\study\AI\breeze-tts\sillytavern-breeze\branches\ttsvoice-render`，打开这里的 `酒馆插件.code-workspace`。`extension/` 是可安装扩展，无运行时 npm 依赖。原有酒馆预设、世界书、参考和实验文件保留；迁移清单为 `relocated-files.json`。
 - 音色和合成文件保存在原 TTS 的 `data/tts/`，不放入插件。映射和音频缓存引用存于酒馆当前聊天的 metadata。
@@ -22,7 +22,7 @@
    G:\study\AI\SillyTavern-Launcher\SillyTavern\data\default-user\extensions\sillytavern-breeze\
    ```
 
-   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.4.zip`。
+   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.5.zip`。
 
    ```powershell
    .\install.ps1 -SillyTavernPath 'G:\study\AI\SillyTavern-Launcher\SillyTavern' -InstallExperimental
@@ -62,7 +62,7 @@
 
 生成完成后保留完整 WAV 和原有聊天缓存引用，下次点击直接重播；仅预生成时仍使用完整音频流程。切换聊天、修改消息或停止会中止流式播放并取消未完成任务，未完成音频不写入聊天缓存。后端仍按原队列串行推理。
 
-首次升级到支持音频流式的 Breeze 后端需要重启；本次插件更新无需重启已有配套后端。不支持流式的旧后端会提示更新或关闭该开关。浏览器自动播放权限仍适用，首次可能需要手动点击一次气泡。此开关控制 TTS 音频传输，与「读取流式文本」独立，可按需组合开启。
+首次升级到支持音频流式的 Breeze 后端需要重启；本次旁白克隆更新也需同步后端代码并重启。不支持流式的旧后端会提示更新或关闭该开关。浏览器自动播放权限仍适用，首次可能需要手动点击一次气泡。此开关控制 TTS 音频传输，与「读取流式文本」独立，可按需组合开启。
 
 ### 预设注入设置
 
@@ -84,7 +84,9 @@
 
 ## 旁白朗读
 
-在「角色与音色 → 旁白声音」为当前聊天选择本地音色，情绪默认「平稳口气，配音」，可填写简短发声要求。音色和情绪随聊天保存；选择「不朗读旁白」关闭，音色失效也会跳过。旁白不加入角色名单或注入预设，不需要模型输出新标签。
+0.7.0-tag-render.5 需要同时更新并重启 Breeze 后端，再刷新酒馆。插件通过健康接口确认真正的克隆支持；旧后端会提示更新，不会静默按声音方向合成。角色对白仍使用原来的情绪控制，预设不变。
+
+在「角色与音色 → 旁白声音」为当前聊天选择本地音色和模式。默认「声音克隆」沿用参考音频的语气与风格，不发送情绪指令，CFG 固定为 1；已有旁白配置没有模式字段时也默认克隆。选择「声音方向」后可编辑情绪，默认「平稳口气，配音」，沿用全局 CFG。切换模式保留已写情绪，各模式音频缓存分开。音色、模式和情绪随聊天保存；选择「不朗读旁白」关闭，音色失效也会跳过。旁白不加入角色名单或注入预设，不需要模型输出新标签。
 
 消息底部「播放本条」和「自动播放全文」按原文顺序穿插旁白及已绑定角色对白；单个对白气泡仍只播放该句。仅开启自动生成时也会准备旁白音频，已有缓存继续复用。旁白正文外观保持原样，只有旁白的消息也可整条播放。
 
@@ -114,6 +116,8 @@
 - 消息内新角色「就地绑定／跳过」和可配置语气词预设组仍在计划中。自动 prompt 注入已实现。
 
 ## 验证状态
+
+0.7.0-tag-render.5：100 项插件单元／DOM 测试、14 项旁白浏览器用例、64 项相关 Python 测试及 JavaScript 语法检查通过。验证纯克隆模板无指令 token、CFG 1、两个后端入口的流式／非流式、旧配置默认与缓存隔离；浏览器使用模拟音频，未据此评估真实音色相似度。
 
 0.7.0-tag-render.4：98 项单元／DOM 测试及语法检查通过；新增 11 项旁白 Edge 浏览器用例通过，覆盖混合播放、聊天绑定、流式和续写、取消及 375px 布局。48 项旧浏览器用例逐项通过；该次旧回归进程在收尾阶段无输出挂起，已手动终止，未作为正常退出的整套运行记录。测试使用模拟接口和演示音频，尚未验证真实旁白音色听感。
 

@@ -57,6 +57,30 @@ test('cache identity includes voice, emotion, parameters and service', () => {
     assert.notEqual(cacheKey('http://localhost', a), cacheKey('http://other', a));
     assert.notEqual(cacheKey('http://localhost', a), cacheKey('http://localhost', requestFor(s, 'v1', { ...DEFAULTS, seed: 43 })));
 });
+test('clone narration strips direction guidance, fixes CFG, and cannot reuse direction audio', () => {
+    const settings = { ...DEFAULTS, cfgScale: 3, seed: 92 };
+    const segment = { kind: 'narration', text: '阳光照进教室。', emotion: '温柔沉静', speechMode: 'clone' };
+    const clone = requestFor(segment, 'narrator', settings);
+    const direction = requestFor({ ...segment, speechMode: 'direction' }, 'narrator', settings);
+    assert.equal(clone.speech_mode, 'clone');
+    assert.equal(clone.emotion, '');
+    assert.equal(clone.cfg_scale, 1);
+    assert.equal(clone.seed, 92);
+    assert.equal(direction.emotion, segment.emotion);
+    assert.equal(direction.cfg_scale, 3);
+    assert.notEqual(cacheKey('http://localhost', clone), cacheKey('http://localhost', direction));
+    const neutralDirection = requestFor({ ...segment, speechMode: 'direction', emotion: '' }, 'narrator', { ...settings, cfgScale: 1 });
+    assert.notEqual(cacheKey('http://localhost', clone), cacheKey('http://localhost', neutralDirection));
+});
+test('narration clone settings never change character dialogue requests', () => {
+    const settings = { ...DEFAULTS, cfgScale: 2.5 };
+    const dialogue = { text: '我来带路。', emotion: 'softly reassuring' };
+    const expected = requestFor(dialogue, 'character', settings);
+    assert.deepEqual(requestFor({ ...dialogue, speechMode: 'clone' }, 'character', settings), expected);
+    assert.equal(expected.emotion, 'softly reassuring');
+    assert.equal(expected.cfg_scale, 2.5);
+    assert.notEqual(expected.speech_mode, 'clone');
+});
 test('service URL rejects credentials and non-HTTP schemes', () => {
     assert.equal(normalizeBase('http://localhost:7860/'), 'http://localhost:7860');
     assert.throws(() => normalizeBase('javascript:alert(1)'));

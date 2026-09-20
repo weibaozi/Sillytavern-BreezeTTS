@@ -34,5 +34,5 @@ if ($PSCmdlet.ShouldProcess($destination, 'Back up existing extension and instal
         Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
     }
     Write-Output "Installed: $destination"
-    Write-Output 'Reload SillyTavern. This extension update does not require restarting the Breeze backend.'
+    Write-Output 'Reload SillyTavern. Narrator clone mode requires the updated Breeze backend; restart it after applying the backend changes.'
 }

@@ -146,7 +146,7 @@ const server = createServer(async (req, res) => {
         if (path === '/' && req.method === 'GET') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(html); }
         if (path === '/__demo/reset' && req.method === 'POST') { reset(); return json(res, { demo: true, reset: true }); }
         if (path === '/__demo/state' && req.method === 'GET') return json(res, state);
-        if (path === '/breeze/health' && req.method === 'GET') return json(res, { version: 1, loaded: true, queued: 0, running: false, streaming: true, demo: true });
+        if (path === '/breeze/health' && req.method === 'GET') return json(res, { version: 1, loaded: true, queued: 0, running: false, streaming: true, speech_modes: ['direction', 'clone'], demo: true });
         if (path === '/breeze/voices' && req.method === 'GET') return json(res, { voices: state.voices, demo: true });
         if (path === '/breeze/voices' && req.method === 'POST') {
             const data = await new Request('http://127.0.0.1/demo-upload', { method: 'POST', headers: { 'Content-Type': req.headers['content-type'] }, body: await body(req) }).formData();

@@ -52,8 +52,10 @@ export function createStudioPanel() {
               <div class="narrator-heading"><span class="section-icon">${icon('narration')}</span><div><h3 id="narrator-heading">旁白声音</h3><p>选择音色后，全部播放与自动播放会按正文顺序穿插朗读旁白。</p></div><span class="editor-chip">随当前聊天保存</span></div>
               <div class="narrator-fields">
                 <div class="field"><label for="breeze-narrator-voice">旁白音色</label><div class="narrator-voice-control"><select id="breeze-narrator-voice" data-narrator-voice aria-describedby="narrator-status"><option value="">不朗读旁白</option></select><button class="preview-button" type="button" data-narrator-preview aria-label="试听旁白音色" title="试听所选音色" disabled>${icon('play')} 试听</button></div></div>
-                <label class="field" for="breeze-narrator-emotion">情绪与表达<input id="breeze-narrator-emotion" data-narrator-emotion type="text" maxlength="300" value="平稳口气，配音" placeholder="平稳口气，配音" aria-describedby="narrator-status"></label>
+                <label class="field" for="breeze-narrator-mode">旁白模式<select id="breeze-narrator-mode" data-narrator-mode aria-describedby="narrator-mode-help"><option value="clone">声音克隆 · 沿用参考风格</option><option value="direction">声音方向 · 自定义情绪</option></select></label>
+                <label class="field narrator-emotion-field" for="breeze-narrator-emotion">情绪与表达<input id="breeze-narrator-emotion" data-narrator-emotion type="text" maxlength="300" value="平稳口气，配音" placeholder="平稳口气，配音" aria-describedby="narrator-mode-help" disabled></label>
               </div>
+              <p id="narrator-mode-help" class="guidance-status" data-narrator-mode-help>沿用参考音频的音色、语气与风格，不附加情绪指令。</p>
               <p id="narrator-status" class="guidance-status" data-narrator-status role="status" aria-live="polite">未设置旁白音色。</p>
             </section>
             <div class="section-toolbar"><div><h3>角色列表</h3><p>未绑定角色会跳过朗读；多个角色可共用音色。</p></div><label class="search-field">${icon('search')}<input data-character-search type="search" placeholder="查找角色" aria-label="查找角色"></label></div>

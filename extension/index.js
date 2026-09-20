@@ -18,13 +18,14 @@ let automaticTimer, allowAutomatic = false;
 let chatObserver, observedChat, rendering = false, generationType = null, continueCutoff = 0, continueMessageId = null;
 const liveMessageIds = new Set();
 let injectionType = null;
-let serviceState = 'offline', supportsStreaming = false, previewAudio, previewButton;
+let serviceState = 'offline', supportsStreaming = false, supportsCloning = false, previewAudio, previewButton;
 const memory = new Map();
 const DEFAULT_NARRATOR_EMOTION = '平稳口气，配音';
 
 function narratorConfig(data = meta()) {
     const saved = data.narrator || {};
     return { voiceId: typeof saved.voiceId === 'string' ? saved.voiceId : '',
+        mode: saved.mode === 'direction' ? 'direction' : 'clone',
         emotion: typeof saved.emotion === 'string' && saved.emotion.trim() ? saved.emotion.trim().slice(0, 300) : DEFAULT_NARRATOR_EMOTION };
 }
 function itemVoice(item) {
@@ -178,6 +179,9 @@ async function prepare(item, signal, { stream = false } = {}) {
     if (!voiceId) throw new Error('尚未绑定有效音色，请在 Breeze 语音面板中选择。');
     const api = client;
     const request = requestFor(item.segment, voiceId, settings);
+    if (request.speech_mode === 'clone' && !supportsCloning) {
+        throw new Error('当前 Breeze 后端尚不支持旁白克隆，请更新并重启 Breeze WebUI 后重新连接。');
+    }
     const key = cacheKey(api.base, request);
     if (memory.has(key)) {
         const audio = memory.get(key); update(item, 'ready', '', audio.duration); return audio;
@@ -371,6 +375,7 @@ function renderMessages(onlyMessageId) {
         const narration = voices.some(voice => voice.id === narrator.voiceId) ? parseNarration(msg.mes, ctx.name1, { streaming: live }) : [];
         for (const segment of narration) {
             segment.emotion = narrator.emotion;
+            segment.speechMode = narrator.mode;
             const id = JSON.stringify([key, messageId, msg.swipe_id ?? 0, epoch, 'narration', segment.start, segment.raw]);
             const previous = items.get(id);
             const item = previous?.epoch === epoch && valid(previous) ? previous : { id, chat: key, messageId, rawMessage: msg.mes,
@@ -408,6 +413,7 @@ async function refreshConnection() {
         if (health.version !== 1 || !Array.isArray(response.voices)) throw new Error('接口版本不匹配，请更新并重启 Breeze WebUI。');
         voices = response.voices;
         supportsStreaming = health.streaming === true;
+        supportsCloning = Array.isArray(health.speech_modes) && health.speech_modes.includes('clone');
         serviceState = health.loaded ? 'ready' : 'unloaded'; refreshStudioSummary();
         refreshPrompt();
         notice(health.loaded ? `已连接 · ${voices.length} 个音色 · ${health.queued} 个等待任务` : '已连接，模型尚未加载。请在 WebUI 加载模型。');
@@ -464,13 +470,18 @@ function renderNarrator() {
     options.options[0].textContent = '不朗读旁白';
     select.replaceChildren(...options.childNodes); select.value = config.voiceId;
     select.disabled = !key; select.dataset.chat = key;
+    const mode = dialog.querySelector('[data-narrator-mode]');
+    mode.value = config.mode; mode.disabled = !key; mode.dataset.chat = key;
     const emotion = dialog.querySelector('[data-narrator-emotion]');
     if (emotion.dataset.chat !== key || dialog.getRootNode().activeElement !== emotion) emotion.value = config.emotion;
-    emotion.dataset.chat = key; emotion.disabled = !key;
+    emotion.dataset.chat = key; emotion.disabled = !key || config.mode === 'clone';
     dialog.querySelector('[data-narrator-preview]').disabled = !key || !voice;
     studioText('[data-narrator-status]', !key ? '打开一个聊天后，为旁白选择音色。'
-        : voice ? `已启用 · ${voice.name} · 全部播放与自动播放会按正文顺序朗读旁白。`
+        : voice ? `已启用 · ${voice.name} · ${config.mode === 'clone' ? '声音克隆：沿用参考音频的语气和风格。' : '声音方向：使用下方情绪与表达。'}`
         : config.voiceId ? '原旁白音色已不可用，请重新选择；当前跳过旁白。' : '尚未选择音色，当前跳过旁白。');
+    studioText('[data-narrator-mode-help]', config.mode === 'clone'
+        ? '沿用参考音频的音色、语气与风格；不附加情绪指令。已填写的情绪会保留，切回声音方向时使用。'
+        : '在参考音色基础上，使用情绪与表达控制本条旁白的语气。');
 }
 function renderVoices() {
     const root = dialog?.querySelector('[data-voices]'); if (!root) return;
@@ -513,13 +524,15 @@ function buildPanel() {
     }, true);
     const narratorVoice = dialog.querySelector('[data-narrator-voice]');
     const narratorEmotion = dialog.querySelector('[data-narrator-emotion]');
+    const narratorMode = dialog.querySelector('[data-narrator-mode]');
     const saveNarrator = event => {
         const key = chatKey(context());
         if (!key || event.target.dataset.chat !== key) { renderNarrator(); return; }
         if (narratorEmotion.value.length > 300) { narratorEmotion.reportValidity(); return; }
         invalidate();
         const data = meta(true);
-        data.narrator = { voiceId: narratorVoice.value, emotion: narratorEmotion.value.trim() || DEFAULT_NARRATOR_EMOTION };
+        data.narrator = { voiceId: narratorVoice.value, mode: narratorMode.value === 'direction' ? 'direction' : 'clone',
+            emotion: narratorEmotion.value.trim() || DEFAULT_NARRATOR_EMOTION };
         narratorEmotion.value = data.narrator.emotion;
         context().chatMetadata[KEY] = data; void saveMeta();
         // Narrator settings affect only playback; they never enter the voice prompt.
@@ -527,6 +540,7 @@ function buildPanel() {
     };
     narratorVoice.addEventListener('change', saveNarrator);
     narratorEmotion.addEventListener('change', saveNarrator);
+    narratorMode.addEventListener('change', saveNarrator);
     dialog.querySelector('[data-narrator-preview]').addEventListener('click', event => {
         const voice = voices.find(value => value.id === narratorConfig().voiceId);
         if (voice && chatKey(context())) void previewVoice(voice, event.currentTarget);
@@ -641,7 +655,7 @@ function buildPanel() {
     dialog.querySelector('[data-connect]').onclick = () => {
         try {
             const base = normalizeBase(dialog.querySelector('[data-setting="baseUrl"]').value);
-            invalidate(); client = new BreezeClient(base); settings.baseUrl = base; voices = []; supportsStreaming = false; memory.clear(); saveSettings();
+            invalidate(); client = new BreezeClient(base); settings.baseUrl = base; voices = []; supportsStreaming = false; supportsCloning = false; memory.clear(); saveSettings();
             refreshPrompt(); renderCharacters(); renderVoices();
             void refreshConnection();
         } catch (error) { notice(error.message); }

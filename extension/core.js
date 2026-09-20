@@ -184,6 +184,10 @@ export function mappedVoice(mappings, speaker, voices) {
 }
 
 export function requestFor(segment, voiceId, settings) {
+    if (segment.kind === 'narration' && segment.speechMode === 'clone') {
+        return { kind: 'speech', voice_id: voiceId, text: segment.text, speech_mode: 'clone', emotion: '',
+            cfg_scale: 1, seed: Number(settings.seed) };
+    }
     return { kind: 'speech', voice_id: voiceId, text: segment.text, emotion: /^new$/i.test(segment.emotion) ? 'default' : segment.emotion,
         cfg_scale: Number(settings.cfgScale), seed: Number(settings.seed) };
 }
