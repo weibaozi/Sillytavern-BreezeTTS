@@ -5,7 +5,7 @@ import { AutomaticSpeechQueue } from './automatic-queue.js';
 import { PROMPT_DEFAULTS, DEFAULT_TEMPLATE, STABLE_DEFAULT_TEMPLATE, DEFAULT_VOCAL_EVENTS, LEGACY_VOCAL_EVENTS, PREVIOUS_DEFAULT_VOCAL_EVENTS, parseVocalEvents, syncVoicePrompt } from './prompt.js';
 import { listExtraPresets, createExtraPreset, updateExtraPreset, deleteExtraPreset, uniqueExtraPresetName, migrateLegacyExtraPrompt } from './extra-prompts.js';
 import { displayDialogue, hasLegacyDialogue } from './dialogue-render.js';
-import { parseNarration } from './narration.js';
+import { parseNarration, normalizeNarrationTargetChars } from './narration.js';
 import { createStudioPanel } from './panel.js';
 import { mountStudioEntry } from './menu.js';
 
@@ -26,6 +26,7 @@ function narratorConfig(data = meta()) {
     const saved = data.narrator || {};
     return { voiceId: typeof saved.voiceId === 'string' ? saved.voiceId : '',
         mode: saved.mode === 'direction' ? 'direction' : 'clone',
+        targetChars: normalizeNarrationTargetChars(saved.targetChars),
         emotion: typeof saved.emotion === 'string' && saved.emotion.trim() ? saved.emotion.trim().slice(0, 300) : DEFAULT_NARRATOR_EMOTION };
 }
 function itemVoice(item) {
@@ -228,12 +229,30 @@ async function prepare(item, signal, { stream = false } = {}) {
     const record = await api.runJob(request, { signal, status: state => update(item, state) });
     return cacheResult(record);
 }
-const player = new SpeechPlayer({ prepare, update });
+const player = new SpeechPlayer({ prepare, update, onStateChange: refreshPlaybackControls });
 const automaticQueue = new AutomaticSpeechQueue({ player, isValid: valid,
     onError: error => { allowAutomatic = false; autoPending.clear(); stopPlayback(); if (error.name !== 'AbortError') notice(error.message); } });
 function stopPlayback() {
     automaticQueue.stop();
     for (const item of items.values()) if (['playing', 'paused', 'queued', 'running'].includes(item.state)) update(item, 'idle');
+    refreshPlaybackControls();
+}
+function refreshPlaybackControls() {
+    const active = player.activeItems || [];
+    for (const controls of document.querySelectorAll('.breeze-message-controls')) {
+        const messageId = Number(controls.dataset.messageId);
+        const ownsPlayback = player.active && active.some(item => item.messageId === messageId)
+            || player.paused && automaticQueue.activeItems.some(item => item.messageId === messageId);
+        const pause = controls.querySelector('.breeze-message-pause'), stop = controls.querySelector('.breeze-message-stop');
+        if (pause) {
+            pause.disabled = !ownsPlayback;
+            pause.textContent = ownsPlayback && player.paused ? '▶ 继续' : '⏸ 暂停';
+            pause.setAttribute('aria-pressed', String(Boolean(ownsPlayback && player.paused)));
+            pause.title = ownsPlayback && player.paused ? '从暂停处继续播放' : '暂停本条语音队列';
+        }
+        if (stop) stop.disabled = !ownsPlayback;
+        controls.dataset.state = ownsPlayback ? player.paused ? 'paused' : 'playing' : 'idle';
+    }
 }
 function invalidate() {
     stopPlayback(); stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
@@ -308,7 +327,11 @@ function insertBubbles(container, messageItems, pending = []) {
         range.deleteContents(); range.insertNode(wrapper);
     }
     const tray = el('div', null, 'breeze-tray');
-    const all = el('button', '▶ 播放本条', 'menu_button'); all.type = 'button';
+    const controls = el('div', null, 'breeze-message-controls');
+    controls.dataset.messageId = container.getAttribute('mesid');
+    controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', '本条语音播放控制');
+    const all = el('button', '▶ 播放本条', 'breeze-control breeze-message-play'); all.type = 'button';
+    all.title = '按正文顺序从头播放对白与已启用的旁白';
     all.addEventListener('click', () => {
         const eligible = messageItems.filter(item => itemVoice(item));
         if (!eligible.length) return openPanel('characters');
@@ -317,7 +340,15 @@ function insertBubbles(container, messageItems, pending = []) {
         stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
         void player.run(eligible, { stream: settings.streaming }).catch(e => { if (e.name !== 'AbortError') notice(e.message); });
     });
-    if (messageItems.length) tray.append(all);
+    const pause = el('button', '⏸ 暂停', 'breeze-control breeze-message-pause'); pause.type = 'button'; pause.disabled = true;
+    pause.setAttribute('aria-pressed', 'false');
+    pause.addEventListener('click', () => {
+        void player.togglePause().catch(error => { if (error.name !== 'AbortError') notice(error.message); });
+    });
+    const stop = el('button', '■ 停止', 'breeze-control breeze-message-stop'); stop.type = 'button'; stop.disabled = true;
+    stop.title = '结束播放并清空当前语音队列';
+    stop.addEventListener('click', () => { allowAutomatic = false; autoPending.clear(); stopPlayback(); });
+    if (messageItems.length) { controls.append(all, pause, stop); tray.append(controls); }
     for (const item of fallback) {
         const row = el('div', null, 'breeze-fallback');
         if (!settings.hideTags) row.append(el('span', item.segment.raw, 'breeze-original'));
@@ -372,7 +403,8 @@ function renderMessages(onlyMessageId) {
             next.set(id, item); return item;
         });
         const narrator = narratorConfig();
-        const narration = voices.some(voice => voice.id === narrator.voiceId) ? parseNarration(msg.mes, ctx.name1, { streaming: live }) : [];
+        const narration = voices.some(voice => voice.id === narrator.voiceId)
+            ? parseNarration(msg.mes, ctx.name1, { streaming: live, targetChars: narrator.targetChars }) : [];
         for (const segment of narration) {
             segment.emotion = narrator.emotion;
             segment.speechMode = narrator.mode;
@@ -394,6 +426,7 @@ function renderMessages(onlyMessageId) {
     items = next;
     if (automaticQueue.activeItems.some(item => !valid(item)) || (player.current && !valid(player.current))) stopPlayback();
     for (const item of items.values()) update(item, item.state, item.error, item.duration);
+    refreshPlaybackControls();
     if (onlyMessageId == null || !generation) {
         refreshStudioSummary();
         if (dialog?.open) renderCharacters();
@@ -475,6 +508,9 @@ function renderNarrator() {
     const emotion = dialog.querySelector('[data-narrator-emotion]');
     if (emotion.dataset.chat !== key || dialog.getRootNode().activeElement !== emotion) emotion.value = config.emotion;
     emotion.dataset.chat = key; emotion.disabled = !key || config.mode === 'clone';
+    const targetChars = dialog.querySelector('[data-narrator-target-chars]');
+    if (targetChars.dataset.chat !== key || dialog.getRootNode().activeElement !== targetChars) targetChars.value = config.targetChars;
+    targetChars.dataset.chat = key; targetChars.disabled = !key;
     dialog.querySelector('[data-narrator-preview]').disabled = !key || !voice;
     studioText('[data-narrator-status]', !key ? '打开一个聊天后，为旁白选择音色。'
         : voice ? `已启用 · ${voice.name} · ${config.mode === 'clone' ? '声音克隆：沿用参考音频的语气和风格。' : '声音方向：使用下方情绪与表达。'}`
@@ -525,15 +561,19 @@ function buildPanel() {
     const narratorVoice = dialog.querySelector('[data-narrator-voice]');
     const narratorEmotion = dialog.querySelector('[data-narrator-emotion]');
     const narratorMode = dialog.querySelector('[data-narrator-mode]');
+    const narratorTargetChars = dialog.querySelector('[data-narrator-target-chars]');
     const saveNarrator = event => {
         const key = chatKey(context());
         if (!key || event.target.dataset.chat !== key) { renderNarrator(); return; }
         if (narratorEmotion.value.length > 300) { narratorEmotion.reportValidity(); return; }
+        if (!narratorTargetChars.checkValidity()) { narratorTargetChars.reportValidity(); return; }
         invalidate();
         const data = meta(true);
         data.narrator = { voiceId: narratorVoice.value, mode: narratorMode.value === 'direction' ? 'direction' : 'clone',
+            targetChars: normalizeNarrationTargetChars(narratorTargetChars.value),
             emotion: narratorEmotion.value.trim() || DEFAULT_NARRATOR_EMOTION };
         narratorEmotion.value = data.narrator.emotion;
+        narratorTargetChars.value = data.narrator.targetChars;
         context().chatMetadata[KEY] = data; void saveMeta();
         // Narrator settings affect only playback; they never enter the voice prompt.
         clearTimeout(renderTimer); renderTimer = null; render(); renderNarrator();
@@ -541,6 +581,7 @@ function buildPanel() {
     narratorVoice.addEventListener('change', saveNarrator);
     narratorEmotion.addEventListener('change', saveNarrator);
     narratorMode.addEventListener('change', saveNarrator);
+    narratorTargetChars.addEventListener('change', saveNarrator);
     dialog.querySelector('[data-narrator-preview]').addEventListener('click', event => {
         const voice = voices.find(value => value.id === narratorConfig().voiceId);
         if (voice && chatKey(context())) void previewVoice(voice, event.currentTarget);

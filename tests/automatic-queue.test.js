@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AutomaticSpeechQueue } from '../extension/automatic-queue.js';
+import { SpeechPlayer } from '../extension/player.js';
 
 function deferred() {
     let resolve, reject;
@@ -35,16 +36,16 @@ test('appended utterances wait for active run and keep enqueue order/options', a
     assert.equal(player.stops, 0);
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].items, [a, b]);
-    assert.deepEqual(calls[0].options, { play: false, stream: true });
+    assert.deepEqual(calls[0].options, { play: false, stream: true, preservePause: true });
     assert.equal(queue.busy, true);
     assert.deepEqual(queue.activeItems, [a, b, c, d]);
     calls[0].resolve(); await flush();
     assert.deepEqual(calls[1].items, [c]);
-    assert.deepEqual(calls[1].options, { play: true, stream: false });
+    assert.deepEqual(calls[1].options, { play: true, stream: false, preservePause: true });
     assert.deepEqual(queue.activeItems, [c, d]);
     calls[1].resolve(); await flush();
     assert.deepEqual(calls[2].items, [d]);
-    assert.deepEqual(calls[2].options, { play: true, stream: true });
+    assert.deepEqual(calls[2].options, { play: true, stream: true, preservePause: true });
     calls[2].resolve(); await flush();
     assert.equal(queue.busy, false);
     assert.deepEqual(queue.activeItems, []);
@@ -147,4 +148,53 @@ test('synchronous player errors and failing error handlers do not reject enqueue
     assert.doesNotThrow(() => queue.enqueue([item('a')]));
     assert.equal(queue.busy, false);
     assert.deepEqual(queue.activeItems, []);
+});
+
+test('automatic playback preserves a pause across batches and keeps later streamed utterances queued', async () => {
+    const sounds = [], prepared = [], errors = [];
+    const player = new SpeechPlayer({ prepare: async item => { prepared.push(item.id); return { url: item.id }; },
+        audioFactory: () => {
+            const audio = { paused: true, pause() { this.paused = true; },
+                async play() { this.paused = false; }, removeAttribute() {}, load() {} };
+            sounds.push(audio); return audio;
+        } });
+    const queue = new AutomaticSpeechQueue({ player, onError: error => errors.push(error) });
+    queue.enqueue([item('first')], { play: true });
+    await flush();
+    // Pause can coincide with the last audio-ended event of one streamed batch.
+    player.pause(); sounds[0].onended(); await flush();
+    assert.equal(queue.busy, false); assert.equal(player.paused, true);
+    queue.enqueue([item('narration')], { play: true });
+    queue.enqueue([item('dialogue')], { play: true });
+    await flush();
+    assert.equal(queue.busy, true); assert.equal(player.active, true);
+    assert.equal(player.paused, true); assert.equal(sounds.length, 1);
+    assert.deepEqual(prepared, ['first', 'narration']);
+    assert.deepEqual(queue.activeItems.map(item => item.id), ['narration', 'dialogue']);
+    await player.resume(); await flush();
+    assert.equal(sounds[1].src, 'narration');
+    sounds[1].onended(); await flush();
+    assert.equal(sounds[2].src, 'dialogue');
+    sounds[2].onended(); await flush();
+    assert.equal(queue.busy, false); assert.equal(player.paused, false); assert.deepEqual(errors, []);
+    queue.stop(); assert.equal(player.paused, false);
+});
+
+test('stopping a paused automatic queue discards waiting speech and resets pause for its replacement', async () => {
+    const sounds = [], errors = [];
+    const player = new SpeechPlayer({ prepare: async item => ({ url: item.id }),
+        audioFactory: () => {
+            const audio = { paused: true, pause() { this.paused = true; },
+                async play() { this.paused = false; }, removeAttribute() {}, load() {} };
+            sounds.push(audio); return audio;
+        } });
+    const queue = new AutomaticSpeechQueue({ player, onError: error => errors.push(error) });
+    queue.enqueue([item('old')]); player.pause();
+    queue.enqueue([item('discard')]); await flush();
+    assert.equal(sounds.length, 0);
+    queue.stop(); queue.enqueue([item('replacement')]); await flush();
+    assert.equal(player.paused, false); assert.equal(sounds.length, 1);
+    assert.equal(sounds[0].src, 'replacement'); assert.deepEqual(errors, []);
+    sounds[0].onended(); await flush();
+    assert.equal(queue.busy, false);
 });

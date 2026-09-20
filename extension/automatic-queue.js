@@ -48,7 +48,9 @@ export class AutomaticSpeechQueue {
                 // A chat edit, swipe or changed voice mapping can invalidate work
                 // while another batch is still playing.
                 this.current = batch.items.filter(item => this.isValid(item));
-                if (this.current.length) await this.player.run(this.current, batch.options);
+                // Pause is an intent for the whole automatic queue, including
+                // the gap before a later streamed-text batch is appended.
+                if (this.current.length) await this.player.run(this.current, { ...batch.options, preservePause: true });
                 if (version !== this.version) return;
                 this.current = [];
             }

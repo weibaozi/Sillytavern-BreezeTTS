@@ -143,6 +143,9 @@ h2 { font-size: 19px; font-weight: 500; letter-spacing: .4px; } h3 { font-size: 
 .narrator-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .narrator-fields .field { min-width: 0; margin-bottom: 0; gap: 7px; font-size: 11px; }
 .narrator-fields .narrator-emotion-field { grid-column: 1 / -1; }
+.narrator-fields .narrator-target-field { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 88px; align-items: center; gap: 14px; padding-top: 14px; border-top: 1px solid #394331; }
+.narrator-target-field > span { min-width: 0; }
+.narrator-target-field small { display: block; margin-top: 5px; }
 .narrator-fields :is(input, select) { padding: 8px 10px; font-size: 12px; }
 .narrator-voice-control { display: flex; min-width: 0; gap: 8px; }
 .narrator-voice-control select { flex: 1; min-width: 0; }

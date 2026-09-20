@@ -1,5 +1,13 @@
 import { excludedText } from './core.js';
 
+export const DEFAULT_NARRATION_TARGET_CHARS = 100;
+
+export function normalizeNarrationTargetChars(value) {
+    if (!['number', 'string'].includes(typeof value) || String(value).trim() === '') return DEFAULT_NARRATION_TARGET_CHARS;
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(1000, Math.max(20, Math.round(number))) : DEFAULT_NARRATION_TARGET_CHARS;
+}
+
 // Offsets always refer to the original message, even when formatting is hidden.
 // A hard exclusion ends a narration fragment; soft formatting stays inside it.
 const SOFT = 1, EXCLUDED = 2, PENDING = 3;
@@ -154,56 +162,100 @@ function markupMask(raw, streaming) {
     for (const match of raw.matchAll(/https?:\/\/[^\s<>"'\]。！？；，]+/g)) {
         if (!mask[match.index]) mask.fill(EXCLUDED, match.index, match.index + match[0].length);
     }
-    for (const match of raw.matchAll(/^\s*(?:#{1,6}\s+|[-+*]\s+|\d+[.)]\s+)/gm)) {
+    for (const match of raw.matchAll(/^\s*(?:#{1,6}\s*|[-+*]\s+|\d+[.)]\s+)/gm)) {
         for (let i = match.index; i < match.index + match[0].length; i++) if (!mask[i]) mask[i] = SOFT;
     }
     quotedRanges(raw, mask);
     return mask;
 }
 
-function plainText(value) {
-    return value
-        .replace(/^\s*(?:#{1,6}\s*|[-+*]\s+|\d+[.)]\s+)/gm, '')
-        .replace(/\\([\\`*_{}\[\]()#+.!~>-])/g, '$1')
-        .replace(/[*_~`]/g, '')
-        .replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, decodeEntity)
-        .replace(/\s+/g, ' ').trim();
-}
-
 /** Extract only prose narration, ordered by original source position.
- * Streaming emits immutable completed fragments; the unfinished final phrase
- * is held until a sentence, paragraph, speech boundary, or generation finish.
+ * Adjacent sentences share a chunk up to the target's last complete sentence.
+ * Streaming waits until the next sentence cannot fit before committing a chunk;
+ * paragraphs and speech boundaries flush immediately. A long sentence remains
+ * whole, subject to the existing 5000-character request protection.
  */
-export function parseNarration(raw = '', userName = '', { streaming = false } = {}) {
+export function parseNarration(raw = '', userName = '', { streaming = false, targetChars = DEFAULT_NARRATION_TARGET_CHARS } = {}) {
     raw = String(raw);
     void userName; // Every quoted/TTS utterance is excluded, regardless of speaker.
+    const target = normalizeNarrationTargetChars(targetChars);
     const mask = markupMask(raw, streaming);
     const segments = [];
-    let start = -1, value = '';
-    const flush = end => {
-        if (start < 0) return;
-        let trimmedEnd = end;
-        while (trimmedEnd > start && /\s/.test(raw[trimmedEnd - 1])) trimmedEnd--;
-        const text = plainText(value);
-        if (/[\p{L}\p{N}]/u.test(text)) segments.push({ kind: 'narration', speaker: '旁白', text,
-            start, end: trimmedEnd, raw: raw.slice(start, trimmedEnd), ordinal: segments.length });
-        start = -1; value = '';
+    // Each visible Unicode character keeps its original source extent. This
+    // makes both length accounting and cuts independent of markup/entity width.
+    let units = [];
+    const append = (char, start, end) => {
+        if (/\s/.test(char)) {
+            if (!units.length || units.at(-1).char === ' ') return;
+            char = ' ';
+        }
+        units.push({ char, start, end });
+    };
+    const flush = complete => {
+        let tail = units.length;
+        while (tail > 0 && units[tail - 1].char === ' ') tail--;
+        const boundaries = [];
+        for (let i = 0; i < tail; i++) {
+            const char = units[i].char;
+            if (/[。！？!?；;]/.test(char) || (char === '.' && (units[i + 1]?.char === ' ' || (complete && i + 1 === tail)))) boundaries.push(i + 1);
+        }
+        let from = 0;
+        while (from < tail) {
+            while (from < tail && units[from].char === ' ') from++;
+            if (from >= tail) break;
+            const within = boundaries.filter(end => end > from && end <= from + target).at(-1);
+            let to;
+            if (within && (tail > from + target || within === from + target)) to = within;
+            else if (tail > from + target) {
+                const firstSentence = boundaries.find(end => end > from);
+                if (firstSentence && firstSentence <= from + 5000) to = firstSentence;
+                else if (tail >= from + 5000) to = from + 5000;
+            }
+            if (!to) {
+                if (!complete) break;
+                to = Math.min(tail, from + 5000);
+            }
+            let contentEnd = to;
+            while (contentEnd > from && units[contentEnd - 1].char === ' ') contentEnd--;
+            const text = units.slice(from, contentEnd).map(unit => unit.char).join('');
+            if (/[\p{L}\p{N}]/u.test(text)) {
+                const start = units[from].start, end = units[contentEnd - 1].end;
+                segments.push({ kind: 'narration', speaker: '旁白', text, start, end, raw: raw.slice(start, end), ordinal: segments.length });
+            }
+            from = to;
+        }
+        units = [];
     };
     for (let i = 0; i < raw.length; i++) {
         if (mask[i] === PENDING) break;
-        if (mask[i] === EXCLUDED || raw[i] === '\n' || raw[i] === '\r') { flush(i); continue; }
+        if (mask[i] === EXCLUDED || raw[i] === '\n' || raw[i] === '\r') { flush(true); continue; }
         if (mask[i] === SOFT) continue;
-        if (start < 0 && /\s/.test(raw[i])) continue;
-        if (start < 0) start = i;
-        const entity = raw[i] === '&' && /^&(?:#x[\da-f]+|#\d+|[a-z]+);/i.exec(raw.slice(i));
-        if (entity) { value += entity[0]; i += entity[0].length - 1; continue; }
-        value += raw[i];
-        // Do not commit a final period until its next character proves it is
-        // not a decimal point; final generation flushes it normally.
-        if (/[。！？?；;]/.test(raw[i]) || (raw[i] === '!' && (!streaming || i + 1 < raw.length)) ||
-            (raw[i] === '.' && /\s/.test(raw[i + 1] ?? '')) ||
-            (value.length >= 5000 && !/[\uD800-\uDBFF]/.test(raw[i]))) flush(i + 1);
+        if (/[*_~`]/.test(raw[i])) continue;
+        if (raw[i] === '\\' && /[\\`*_{}\[\]()#+.!~>-]/.test(raw[i + 1] ?? '')) {
+            if (!mask[i + 1]) {
+                if (!/[*_~`]/.test(raw[i + 1])) append(raw[i + 1], i, i + 2);
+                i++;
+            }
+            continue;
+        }
+        // These incomplete tokens can become silent markup or a shorter entity
+        // on the next update, so they cannot count toward an irrevocable cut.
+        const suffix = raw.slice(i);
+        if (streaming && ((i + 1 === raw.length && /[!\\\uD800-\uDBFF]/.test(raw[i])) ||
+            /^&(?:#[xX]?[\da-f]*|[a-z]*)$/i.test(suffix) || /^(?:h|ht|htt|https?|https?:\/{0,2})$/i.test(suffix))) break;
+        const entity = raw[i] === '&' && /^&(#x[\da-f]+|#\d+|[a-z]+);/i.exec(suffix);
+        if (entity) {
+            const decoded = decodeEntity(entity[0], entity[1]);
+            if (decoded !== entity[0]) {
+                for (const char of decoded) append(char, i, i + entity[0].length);
+                i += entity[0].length - 1;
+                continue;
+            }
+        }
+        const char = String.fromCodePoint(raw.codePointAt(i));
+        append(char, i, i + char.length);
+        i += char.length - 1;
     }
-    if (!streaming) flush(raw.length);
+    flush(!streaming);
     return segments;
 }

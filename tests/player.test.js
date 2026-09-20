@@ -137,3 +137,182 @@ test('abort between prepared-descriptor registration and playback cancels exactl
     await new Promise(r => setImmediate(r));
     assert.equal(cancelled, 1); assert.equal(played, 0);
 });
+
+test('global pause holds preparing speech, resumes its audio offset and keeps the remaining order', async () => {
+    const first = deferred(), sounds = [], states = [];
+    const a = item('narration'), b = item('dialogue');
+    const player = new SpeechPlayer({
+        prepare: async item => item === a ? first.promise : { url: item.id },
+        audioFactory: () => { const audio = new FakeAudio(); audio.currentTime = 0; sounds.push(audio); return audio; },
+        update: (item, state) => { item.state = state; },
+        onStateChange: state => states.push(state),
+    });
+    assert.equal(states.length, 0);
+    const running = player.run([a, b]);
+    assert.equal(player.active, true);
+    assert.deepEqual(player.activeItems, [a, b]);
+    assert.equal(player.pause(), true);
+    assert.equal(player.paused, true);
+    first.resolve({ url: a.id });
+    await new Promise(r => setImmediate(r));
+    assert.equal(sounds.length, 0);
+    await player.resume(); await new Promise(r => setImmediate(r));
+    assert.equal(sounds.length, 1); assert.equal(sounds[0].src, 'narration');
+    sounds[0].currentTime = 1.25;
+    await player.toggle(a);
+    assert.equal(player.paused, true); assert.equal(a.state, 'paused');
+    assert.equal(sounds[0].paused, true);
+    await player.togglePause();
+    assert.equal(sounds[0].currentTime, 1.25); assert.equal(sounds.length, 1);
+    assert.equal(sounds[0].paused, false); assert.equal(a.state, 'playing');
+    sounds[0].onended(); await new Promise(r => setImmediate(r));
+    assert.equal(sounds[1].src, 'dialogue');
+    sounds[1].onended(); await running;
+    assert.equal(player.active, false); assert.equal(player.paused, false);
+    assert.deepEqual(player.activeItems, []);
+    assert.deepEqual(states.at(-1), { active: false, paused: false, current: null, items: [] });
+});
+
+test('generate-only work is never an active playback or a pause target', async () => {
+    const prepared = deferred(); let sounds = 0;
+    const player = new SpeechPlayer({ prepare: () => prepared.promise,
+        audioFactory: () => { sounds++; return new FakeAudio(); } });
+    const running = player.run([item('cache')], { play: false });
+    assert.equal(player.active, false); assert.deepEqual(player.activeItems, []);
+    assert.equal(await player.togglePause(), false); assert.equal(player.paused, false);
+    prepared.resolve({ url: 'cache.wav' }); await running;
+    assert.equal(sounds, 0);
+});
+
+test('stop aborts a paused prepared stream exactly once without starting it', async () => {
+    let cancelled = 0, started = 0;
+    const player = new SpeechPlayer({
+        prepare: async () => ({ streamUrl: 'prepared', cancel: async () => { cancelled++; } }),
+        streamFactory: () => ({ wake: async () => {}, dispose() {}, run: async () => { started++; } }),
+    });
+    const running = player.run([item('held')], { stream: true });
+    const failure = assert.rejects(running, { name: 'AbortError' });
+    player.pause(); await new Promise(r => setImmediate(r));
+    player.stop(); await failure; await new Promise(r => setImmediate(r));
+    assert.equal(started, 0); assert.equal(cancelled, 1);
+    assert.equal(player.paused, false); assert.equal(player.active, false);
+    assert.deepEqual(player.activeItems, []);
+});
+
+test('a pause immediately after transport selection retains prepared-job cancellation ownership', async () => {
+    let cancelled = 0, started = 0, player;
+    const transport = { wake: async () => {}, dispose() {}, pause() {}, run: async () => { started++; } };
+    player = new SpeechPlayer({
+        prepare: async () => ({ streamUrl: 'handoff', cancel: async () => { cancelled++; } }),
+        streamFactory: () => transport,
+        onStateChange: state => { if (state.current && !state.paused) player.pause(); },
+    });
+    const running = player.run([item('handoff')], { stream: true });
+    const failure = assert.rejects(running, { name: 'AbortError' });
+    await new Promise(r => setImmediate(r));
+    assert.equal(player.current.id, 'handoff'); assert.equal(started, 0);
+    player.stop(); await failure; await new Promise(r => setImmediate(r));
+    assert.equal(cancelled, 1);
+});
+
+test('pausing during streaming preparation holds the first source and resumes the same transport', async () => {
+    const prepared = deferred(), tail = deferred(); let started = 0, created = 0;
+    const transport = {
+        paused: false, wake: async () => {}, dispose() {},
+        pause() { this.paused = true; }, async play() { this.paused = false; },
+        async run(record, signal, start) { started++; start(); await tail.promise; return { duration: 1 }; },
+    };
+    const a = item('stream');
+    const player = new SpeechPlayer({ prepare: () => prepared.promise,
+        streamFactory: () => { created++; return transport; }, update: (item, state) => { item.state = state; } });
+    const running = player.run([a], { stream: true });
+    player.pause(); prepared.resolve({ streamUrl: 'stream' }); await new Promise(r => setImmediate(r));
+    assert.equal(started, 0);
+    await player.resume(); await new Promise(r => setImmediate(r));
+    assert.equal(started, 1); assert.equal(a.state, 'playing');
+    player.pause(); assert.equal(transport.paused, true); assert.equal(a.state, 'paused');
+    await player.resume(); assert.equal(transport.paused, false); assert.equal(created, 1);
+    tail.resolve(); await running;
+});
+
+test('rapid resume then pause cannot release a waiting segment', async () => {
+    let sounds = 0;
+    const player = new SpeechPlayer({ prepare: async () => ({ url: 'held.wav' }),
+        audioFactory: () => { sounds++; return new FakeAudio(); } });
+    const running = player.run([item('held')]);
+    const failure = assert.rejects(running, { name: 'AbortError' });
+    player.pause(); await new Promise(r => setImmediate(r));
+    const resumed = player.resume(); player.pause(); await resumed;
+    await new Promise(r => setImmediate(r));
+    assert.equal(player.paused, true); assert.equal(sounds, 0);
+    player.stop(); await failure;
+});
+
+test('a late resume completion cannot clear or pause replacement playback', async () => {
+    const resumed = deferred(), sounds = [];
+    const player = new SpeechPlayer({ prepare: async item => ({ url: item.id }),
+        audioFactory: () => { const audio = new FakeAudio(); sounds.push(audio); return audio; } });
+    const old = player.run([item('old')]);
+    const oldFailure = assert.rejects(old, { name: 'AbortError' });
+    await new Promise(r => setImmediate(r)); player.pause();
+    sounds[0].play = () => resumed.promise.then(() => { sounds[0].paused = false; });
+    const resuming = player.resume();
+    const resumeFailure = assert.rejects(resuming, { name: 'AbortError' });
+    const replacement = item('new');
+    const fresh = player.run([replacement]);
+    await new Promise(r => setImmediate(r));
+    resumed.resolve(); await oldFailure; await resumeFailure;
+    assert.equal(player.active, true); assert.equal(player.paused, false);
+    assert.deepEqual(player.activeItems, [replacement]);
+    assert.equal(sounds[0].paused, true); assert.equal(sounds[1].paused, false);
+    sounds[1].onended(); await fresh;
+});
+
+test('pause interrupting the initial audio play promise does not fail the sequence', async () => {
+    let rejectInitial;
+    const initial = new Promise((_, reject) => { rejectInitial = reject; });
+    const audio = new FakeAudio(); let starts = 0;
+    audio.play = () => { audio.paused = false; return ++starts === 1 ? initial : Promise.resolve(); };
+    const a = item('a');
+    const player = new SpeechPlayer({ prepare: async () => ({ url: 'a' }), audioFactory: () => audio,
+        update: (item, state) => { item.state = state; } });
+    const running = player.run([a]);
+    await new Promise(r => setImmediate(r)); player.pause();
+    rejectInitial(Object.assign(new Error('play interrupted'), { name: 'AbortError' }));
+    await new Promise(r => setImmediate(r));
+    assert.equal(player.active, true); assert.equal(a.state, 'paused');
+    await player.resume(); assert.equal(audio.paused, false);
+    audio.onended(); await running;
+});
+
+test('an interrupted initial play can reject after resume without stopping the resumed audio', async () => {
+    let rejectInitial;
+    const initial = new Promise((_, reject) => { rejectInitial = reject; });
+    const audio = new FakeAudio(); let starts = 0;
+    audio.play = () => { audio.paused = false; return ++starts === 1 ? initial : Promise.resolve(); };
+    const player = new SpeechPlayer({ prepare: async () => ({ url: 'a' }), audioFactory: () => audio });
+    const running = player.run([item('a')]);
+    await new Promise(r => setImmediate(r)); player.pause(); await player.resume();
+    rejectInitial(Object.assign(new Error('old play interrupted'), { name: 'AbortError' }));
+    await new Promise(r => setImmediate(r));
+    assert.equal(player.active, true); assert.equal(player.paused, false); assert.equal(audio.paused, false);
+    audio.onended(); await running;
+});
+
+test('a resume settling after its utterance ends cannot pause the next utterance in the same run', async () => {
+    const resumed = deferred(), sounds = [], a = item('a'), b = item('b');
+    const player = new SpeechPlayer({ prepare: async item => ({ url: item.id }),
+        audioFactory: () => { const audio = new FakeAudio(); sounds.push(audio); return audio; },
+        update: (item, state) => { item.state = state; } });
+    const running = player.run([a, b]);
+    await new Promise(r => setImmediate(r)); player.pause();
+    sounds[0].play = () => resumed.promise.then(() => { sounds[0].paused = false; });
+    const resuming = player.resume();
+    const stale = assert.rejects(resuming, { name: 'AbortError' });
+    sounds[0].onended(); await new Promise(r => setImmediate(r));
+    assert.equal(player.current, b);
+    resumed.resolve(); await stale;
+    assert.equal(player.paused, false); assert.equal(sounds[1].paused, false);
+    assert.equal(a.state, 'ready'); assert.equal(b.state, 'playing');
+    sounds[1].onended(); await running;
+});

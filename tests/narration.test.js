@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseNarration } from '../extension/narration.js';
+import { parseNarration, DEFAULT_NARRATION_TARGET_CHARS, normalizeNarrationTargetChars } from '../extension/narration.js';
 import { parseTTS } from '../extension/core.js';
 
 const texts = (raw, streaming = false) => parseNarration(raw, '包子', { streaming }).map(s => s.text);
@@ -24,7 +24,7 @@ test('quoted legacy/user/skipped dialogue is never read as narration', () => {
 
 test('English apostrophes remain prose and contractions inside speech stay excluded', () => {
     const raw = "The student's notebook isn't here. He said 'Don't do that!' and left. It’s late.";
-    assert.deepEqual(texts(raw), ["The student's notebook isn't here.", 'He said', 'and left.', 'It’s late.']);
+    assert.deepEqual(texts(raw), ["The student's notebook isn't here. He said", 'and left. It’s late.']);
 });
 
 test('body markers exclude before/after modules and previous AI transcript', () => {
@@ -90,10 +90,10 @@ test('malformed, nested and incomplete voice tags never become narration', () =>
     assert.deepEqual(texts(raw), ['真实旁白。']);
 });
 
-test('streaming submits sentences and paragraphs but withholds an unfinished tail', () => {
-    assert.deepEqual(texts('他走进教室。她正低头', true), ['他走进教室。']);
-    assert.deepEqual(texts('他走进教室。她正低头\n', true), ['他走进教室。', '她正低头']);
-    assert.deepEqual(texts('他走进教室。她正低头'), ['他走进教室。', '她正低头']);
+test('streaming groups short sentences and flushes paragraphs or speech boundaries', () => {
+    assert.deepEqual(texts('他走进教室。她正低头', true), []);
+    assert.deepEqual(texts('他走进教室。她正低头\n', true), ['他走进教室。她正低头']);
+    assert.deepEqual(texts('他走进教室。她正低头'), ['他走进教室。她正低头']);
     assert.deepEqual(texts('他回头[TTSVoice:A:default:你好。]', true), ['他回头']);
 });
 
@@ -103,7 +103,7 @@ test('pending HTML/link syntax cannot change previously committed narration', ()
         ['他[看到了。]', '，然后离开。'], ['他[走向图书馆](https://ex', 'ample.test)。'],
     ]) {
         assert.deepEqual(texts(prefix, true), [], prefix);
-        assert.ok(texts(prefix + suffix, true).length > 0, suffix);
+        assert.ok(texts(prefix + suffix + '\n', true).length > 0, suffix);
     }
     assert.deepEqual(texts('他说“未说完。', true), ['他说']);
 });
@@ -131,7 +131,105 @@ test('streaming entity-quoted speech remains excluded from its opening delimiter
         assert.deepEqual(next.slice(0, committed.length), committed, `prefix at ${end}`);
         committed = next;
     }
-    assert.deepEqual(committed.map(s => s.text), ['他说', '然后走了。']);
+    assert.deepEqual(committed.map(s => s.text), ['他说']);
+    assert.deepEqual(parseNarration(raw).map(s => s.text), ['他说', '然后走了。']);
+});
+
+test('target settings normalize finite numeric values and reject invalid input', () => {
+    assert.equal(DEFAULT_NARRATION_TARGET_CHARS, 100);
+    for (const value of [undefined, null, true, false, '', ' ', 'oops', Infinity, NaN, [], {}, Symbol('bad')]) {
+        assert.equal(normalizeNarrationTargetChars(value), 100);
+    }
+    assert.equal(normalizeNarrationTargetChars('80'), 80);
+    assert.equal(normalizeNarrationTargetChars(80.6), 81);
+    assert.equal(normalizeNarrationTargetChars(5), 20);
+    assert.equal(normalizeNarrationTargetChars(2000), 1000);
+});
+
+test('target chunks use the longest complete sentence sequence inside the target', () => {
+    const sentences = ['甲', '乙', '丙', '丁'].map(char => char.repeat(29) + '。');
+    const raw = sentences.join('');
+    assert.deepEqual(texts(raw), [sentences.slice(0, 3).join(''), sentences[3]]);
+    assert.deepEqual(parseNarration(raw, '', { targetChars: 60 }).map(s => s.text), [sentences[0] + sentences[1], sentences[2] + sentences[3]]);
+    assert.deepEqual(parseNarration(raw, '', { targetChars: 'invalid' }), parseNarration(raw));
+    assert.deepEqual(texts(sentences[0] + '\n' + sentences[1]), [sentences[0], sentences[1]]);
+    assert.deepEqual(texts(sentences[0] + '[TTSVoice:A:default:对白。]' + sentences[1]), [sentences[0], sentences[1]]);
+});
+
+test('streaming waits until the following sentence cannot fit, then commits the prior boundary', () => {
+    const first = '甲'.repeat(29) + '。' + '乙'.repeat(29) + '。' + '丙'.repeat(29) + '。';
+    assert.deepEqual(texts(first, true), []);
+    assert.deepEqual(texts(first + '丁'.repeat(10), true), []);
+    assert.deepEqual(texts(first + '丁'.repeat(11), true), [first]);
+    assert.deepEqual(texts(first + '丁'.repeat(29) + '。', true), [first]);
+    const exact = '甲'.repeat(99) + '。';
+    assert.deepEqual(texts(exact, true), [exact]);
+});
+
+test('an over-target sentence stays whole, while the existing hard limit still applies', () => {
+    const long = '甲'.repeat(149) + '。';
+    assert.deepEqual(texts(long.slice(0, -1), true), []);
+    assert.deepEqual(texts(long, true), [long]);
+    assert.deepEqual(texts(long + '短句。'), [long, '短句。']);
+    const hard = '甲'.repeat(5100) + '。';
+    assert.deepEqual(texts(hard).map(s => Array.from(s).length), [5000, 101]);
+});
+
+test('target counting uses spoken Unicode characters, not source markup or entity widths', () => {
+    const first = '**' + '甲'.repeat(8) + '🙂&#x3002;**'; // Ten visible characters.
+    const second = '<em>' + '乙'.repeat(9) + '。</em>'; // Ten visible characters.
+    const third = '丙'.repeat(9) + '。';
+    const segments = parseNarration(first + second + third, '', { targetChars: 20 });
+    assert.deepEqual(segments.map(s => s.text), ['甲'.repeat(8) + '🙂。' + '乙'.repeat(9) + '。', third]);
+    assert.equal(Array.from(segments[0].text).length, 20);
+    for (const segment of segments) assert.equal(segment.raw, (first + second + third).slice(segment.start, segment.end));
+    assert.ok(segments[0].end <= segments[1].start);
+});
+
+test('target-based streaming matches final parsing without overlap or revised committed chunks', () => {
+    const prefix = '甲'.repeat(14) + '。';
+    const cases = [
+        prefix + '乙'.repeat(8) + '。' + '丙'.repeat(9) + '。末尾',
+        prefix + '风 &amp; 雨。接着向前。',
+        prefix + '走向[图书馆。](https://example.test)。接着向前。',
+        prefix + '他看见![图片。](https://example.test/img.png)然后离开。',
+        prefix + '查看https://example.test/url 后离开。',
+        prefix + '温度3.14度。继续前行。',
+        prefix + '他说&quot;不要读对白。&quot;然后离开。',
+        prefix + '乙'.repeat(3) + '🙂。继续前行。',
+        '甲'.repeat(19) + '！！连续标点后继续。',
+        '甲'.repeat(19) + '!? 连续标点后继续。',
+        prefix + '数值为3.14159，小数保留。下一句。',
+        prefix + 'emoji &#x1F600; 和&amp;实体。下一句。',
+        prefix + '查看http://example.test。然后离开。',
+        prefix + '他[引用标签。][ref]然后离开。',
+        prefix + '然后。\n下一段开始。',
+        prefix + '\\\\路径继续。转身离开。',
+    ];
+    for (const raw of cases) {
+        let committed = [];
+        for (let end = 1; end <= raw.length; end++) {
+            const next = parseNarration(raw.slice(0, end), '', { streaming: true, targetChars: 20 });
+            assert.deepEqual(next.slice(0, committed.length), committed, `prefix at ${end}: ${raw.slice(0, end)}`);
+            committed = next;
+        }
+        const final = parseNarration(raw, '', { targetChars: 20 });
+        assert.deepEqual(final.slice(0, committed.length), committed);
+        for (let i = 0; i < final.length; i++) {
+            assert.equal(final[i].raw, raw.slice(final[i].start, final[i].end));
+            if (i) assert.ok(final[i - 1].end <= final[i].start);
+        }
+    }
+});
+
+test('a surrogate pair cannot be split at the hard streaming boundary', () => {
+    const raw = '甲'.repeat(4999) + '🙂尾声';
+    assert.deepEqual(parseNarration(raw.slice(0, 5000), '', { streaming: true }), []);
+    const first = parseNarration(raw.slice(0, 5001), '', { streaming: true });
+    assert.equal(first.length, 1);
+    assert.equal(Array.from(first[0].text).length, 5000);
+    assert.ok(first[0].text.endsWith('🙂'));
+    assert.deepEqual(parseNarration(raw).slice(0, 1), first);
 });
 
 test('long unpunctuated prose is split within request limits with stable source IDs', () => {
