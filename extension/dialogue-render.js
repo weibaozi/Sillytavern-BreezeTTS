@@ -1,10 +1,10 @@
-import { DEFAULT_VOCAL_EVENTS, parseVocalEvents } from './prompt.js';
+import { DEFAULT_VOCAL_EVENTS, PREVIOUS_DEFAULT_VOCAL_EVENTS, parseVocalEvents } from './prompt.js';
 
 const quotePairs = new Map([['“', '”'], ['‘', '’'], ['「', '」'], ['『', '』'], ['"', '"']]);
 
 function knownEvents(vocalEvents) {
     // Built-in events remain recognizable when reading older chat messages.
-    return new Set(parseVocalEvents(`${DEFAULT_VOCAL_EVENTS}\n${typeof vocalEvents === 'string' ? vocalEvents : ''}`).events);
+    return new Set(parseVocalEvents(`${DEFAULT_VOCAL_EVENTS}\n${PREVIOUS_DEFAULT_VOCAL_EVENTS}\n${typeof vocalEvents === 'string' ? vocalEvents : ''}`).events);
 }
 
 /** Return plain display text. The caller must insert it with textContent. */

@@ -34,7 +34,8 @@ Example (a bound speaker):
 Before ending the body or starting any post-body module, silently check the penultimate and final eligible spoken paragraphs, including a final question to {{user}}. Each needs its own adjacent, complete tag. Fix omissions at their original positions; do not collect tags at the end or print the check.`;
 
 export const LEGACY_VOCAL_EVENTS = '[笑]\n[叹气]\n[咳嗽]\n[清嗓子]';
-export const DEFAULT_VOCAL_EVENTS = [
+// The mixed-bracket defaults from .6 are retained for migration and old chat display.
+export const PREVIOUS_DEFAULT_VOCAL_EVENTS = [
     '[笑]', '[叹气]', '[咳嗽]', '[清嗓子]',
     '[大笑]', '[轻笑]', '[窃笑]', '[偷笑]', '[吸气]', '[呼气]', '[深呼吸]', '[喘气]',
     '[吞咽]', '[咂嘴]', '[哭]', '[抽泣]', '[哽咽]', '[尖叫]', '[惊呼]', '[打哈欠]', '[打喷嚏]', '[哼]', '[停顿]',
@@ -42,6 +43,7 @@ export const DEFAULT_VOCAL_EVENTS = [
     '[soft gasps]', '[gasps]', '[breathy sigh]', '[soft moan]', '[whimper]', '[needy moan]', '[breathy pant]',
     '[low whimper]', '[shaky gasp]', '[low moan]', '[husky sigh]', '[deep pant]', '[throaty hum]',
 ].join('\n');
+export const DEFAULT_VOCAL_EVENTS = PREVIOUS_DEFAULT_VOCAL_EVENTS.replace(/^\[([a-z ]+)\]$/gm, '($1)');
 export const PREVIOUS_DEFAULT_TEMPLATE = LEGACY_DEFAULT_TEMPLATE
     .replace('optionally add audible events at the intended position: {{vocal_events}}. Keep these Chinese tags unchanged.',
         'optionally add only these allowed audible events at the intended position: {{vocal_events}}. Keep event tags unchanged; if none are allowed, add no vocal-event tags.')

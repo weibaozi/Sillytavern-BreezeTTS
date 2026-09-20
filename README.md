@@ -1,4 +1,4 @@
-# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.6（实验分支）
+# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.7（实验分支）
 
 模型只写一份 `[TTSVoice:角色名:情绪:对白]`，插件在显示层把它呈现为普通引号对白和播放气泡。原始聊天 `mes` 保持不变，已绑定角色连接原 Breeze WebUI 合成及播放；未绑定角色仍显示对白，仅跳过语音。原有独立工作室、音色库、流式播放、语气词设置和共享语料库保留。
 
@@ -22,7 +22,7 @@
    G:\study\AI\SillyTavern-Launcher\SillyTavern\data\default-user\extensions\sillytavern-breeze\
    ```
 
-   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.6.zip`。
+   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.7.zip`。
 
    ```powershell
    .\install.ps1 -SillyTavernPath 'G:\study\AI\SillyTavern-Launcher\SillyTavern' -InstallExperimental
@@ -71,7 +71,7 @@
 - 普通生成、重生成、swipe、续写和普通提示词预览使用规则；后台 `quiet` 生成（例如摘要）及 `impersonate` 用户代写跳过规则。切换聊天、映射、角色及预设后重新注册，避免残留旧名单。
 - 未绑定角色仍输出 `New` 标记，以便发现新角色；播放时跳过。注入中的角色名保持剧情人物名，不用音色库名字替代。
 - 内置插槽：`{{primary_character_note}}`、`{{bound_characters_section}}`、`{{skipped_characters_section}}`、`{{unbound_characters_section}}`、`{{vocal_events}}`、`{{vocal_event_example}}`、`{{user}}`。当前跳过名单只包含用户；其他酒馆宏由酒馆发送时处理。预览不是最终完整请求。
-- **语气词列表**：所有聊天共用，默认 47 项，包含中文发声标签、`(laugh)` 等英文圆括号标签，以及 `[soft gasps]`、`[breathy sigh]`、`[soft moan]` 等英文方括号标签。每行一项，也支持中英文逗号、顿号或分号；相邻完整标签自动拆分，保留 `[]`／`()`，未写括号的词补为 `[]`，相同标签自动去重。格式无效的项会提示并跳过。清空表示不添加语气词，可一键恢复默认列表。原四项默认值自动升级，自定义和已清空的列表保留。规则和示例通过上述两个语气词插槽同步更新。
+- **语气词列表**：所有聊天共用，默认 47 项，包含 23 项中文方括号标签与 24 项英文圆括号标签，例如 `[笑]`、`(laugh)`、`(soft gasps)`、`(breathy sigh)`、`(soft moan)`。每行一项，也支持中英文逗号、顿号或分号；相邻完整标签自动拆分，保留 `[]`／`()`，未写括号的词补为 `[]`，相同标签自动去重。格式无效的项会提示并跳过。清空表示不添加语气词，可一键恢复默认列表。原四项默认值和 .6 的混合括号默认值自动升级，自定义和已清空的列表保留。规则和示例通过上述两个语气词插槽同步更新。
 - **额外语料库**：点击「新建并使用」，填写名称与背景、情绪或发声指导；名称在编辑结束时自动保存，内容输入时自动保存并更新预览。名称不可为空或重复。其他聊天直接在下拉框选择已有语料，并开启「在当前聊天启用」即可复用。
 - **聊天绑定**：语料库保存在酒馆插件全局设置，每个聊天只保存所选语料的稳定 ID 和启用状态。修改共享内容会影响所有选用它的聊天；需要单独调整时用「复制并使用」。改名不会破坏绑定。关闭开关或选择「不使用语料」保留库中内容；删除需确认，其他聊天的失效绑定不再注入。
 - **注入与迁移**：只有当前聊天启用、选中有效语料且内容非空时，才在编译预设末尾追加 `6. Additional scene guidance (current chat):` 和正文。0.5.0 的旧语料在打开对应聊天时自动命名、存入库并绑定，保留原开关及旧文字备份，不反复创建；删除或取消绑定不会重新启用旧备份。
@@ -116,6 +116,8 @@
 - 消息内新角色「就地绑定／跳过」和可配置语气词预设组仍在计划中。自动 prompt 注入已实现。
 
 ## 验证状态
+
+0.7.0-tag-render.7：更正全部英文默认语气词为圆括号，自动迁移 .6 默认列表，并兼容历史英文方括号的显示。104 项单元／DOM 测试、28 项预设／对白浏览器用例及语法检查通过。
 
 0.7.0-tag-render.6：默认语气词扩展为 47 项，支持 `[]`／`()`、相邻标签拆分和旧四项默认迁移。104 项单元／DOM 测试、27 项预设／对白浏览器用例与 JavaScript 语法检查通过；新增标签保留在合成文本中，当前版本未逐项试听模型表现。
 

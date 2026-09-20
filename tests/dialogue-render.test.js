@@ -21,6 +21,7 @@ test('display hides built-in English event syntax without removing ordinary pare
     const squareEvents = ['soft gasps', 'gasps', 'breathy sigh', 'soft moan', 'whimper', 'needy moan', 'breathy pant',
         'low whimper', 'shaky gasp', 'low moan', 'husky sigh', 'deep pant', 'throaty hum'];
     assert.equal(displayDialogue(roundEvents.map(event => `(${event})`).join('') + '你好。' + squareEvents.map(event => `[${event}]`).join(''), ''), '你好。');
+    assert.equal(displayDialogue(squareEvents.map(event => `(${event})`).join('') + '你好。', ''), '你好。');
     assert.equal(displayDialogue('(laugh)你好(约 5 分钟)。[soft gasps](未指定事件)[章节一]', ''), '你好(约 5 分钟)。(未指定事件)[章节一]');
     const nested = '[带有(laugh)的文字] (说明[soft gasps]) ((laugh)) [(laugh)] ([笑])';
     assert.equal(displayDialogue(nested, ''), nested);
@@ -29,7 +30,7 @@ test('display hides built-in English event syntax without removing ordinary pare
 });
 
 test('streaming hides only unfinished trailing prefixes of permitted round events', () => {
-    for (const suffix of ['(', '(gas', '(gasp', '(clears thr']) {
+    for (const suffix of ['(', '(gas', '(gasp', '(clears thr', '(soft gasp', '(breathy s']) {
         assert.equal(displayDialogue(`你好${suffix}`, '', { streaming: true }), '你好', suffix);
         assert.equal(displayDialogue(`你好${suffix}`, ''), `你好${suffix}`, suffix);
     }

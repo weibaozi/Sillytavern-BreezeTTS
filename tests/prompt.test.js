@@ -8,7 +8,7 @@ const expectedEvents = [
     '[笑]', '[叹气]', '[咳嗽]', '[清嗓子]',
     '[大笑]', '[轻笑]', '[窃笑]', '[偷笑]', '[吸气]', '[呼气]', '[深呼吸]', '[喘气]', '[吞咽]', '[咂嘴]', '[哭]', '[抽泣]', '[哽咽]', '[尖叫]', '[惊呼]', '[打哈欠]', '[打喷嚏]', '[哼]', '[停顿]',
     '(laugh)', '(giggle)', '(chuckle)', '(sigh)', '(cough)', '(clears throat)', '(sniff)', '(gasp)', '(breath)', '(cry)', '(yawn)',
-    '[soft gasps]', '[gasps]', '[breathy sigh]', '[soft moan]', '[whimper]', '[needy moan]', '[breathy pant]', '[low whimper]', '[shaky gasp]', '[low moan]', '[husky sigh]', '[deep pant]', '[throaty hum]',
+    '(soft gasps)', '(gasps)', '(breathy sigh)', '(soft moan)', '(whimper)', '(needy moan)', '(breathy pant)', '(low whimper)', '(shaky gasp)', '(low moan)', '(husky sigh)', '(deep pant)', '(throaty hum)',
 ];
 const sectionTemplate = [
     'PRIMARY={{primary_character_note}}',
@@ -54,6 +54,8 @@ test('default English protocol includes all 47 events while keeping the original
     assert.equal(expectedEvents.length, 47);
     assert.equal(new Set(expectedEvents).size, 47);
     assert.deepEqual(parseVocalEvents(DEFAULT_VOCAL_EVENTS), { events: expectedEvents, invalid: [] });
+    assert.ok(expectedEvents.slice(0, 23).every(event => event.startsWith('[') && event.endsWith(']')));
+    assert.ok(expectedEvents.slice(23).every(event => event.startsWith('(') && event.endsWith(')')));
     const text = buildVoicePrompt(context(), settings(), voices);
     assert.match(text, /TTSVoice/);
     for (const event of expectedEvents) assert.ok(text.includes(event), event);

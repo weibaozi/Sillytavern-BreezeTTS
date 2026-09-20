@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { DEFAULT_VOCAL_EVENTS } from '../../extension/prompt.js';
+import { DEFAULT_VOCAL_EVENTS, PREVIOUS_DEFAULT_VOCAL_EVENTS } from '../../extension/prompt.js';
 
 const defaults = DEFAULT_VOCAL_EVENTS;
 const previousDefaults = '[笑]\n[叹气]\n[咳嗽]\n[清嗓子]';
@@ -57,7 +57,8 @@ test('vocal-event list starts with 47 defaults and updates both preview and inje
     expect(defaults.trim().split('\n')).toHaveLength(47);
     await expect.poll(() => field(page, 'prompt-preview').inputValue()).toContain('[笑], [叹气], [咳嗽], [清嗓子]');
     expect(await injected(page)).toContain('(clears throat)');
-    expect(await injected(page)).toContain('[throaty hum]');
+    expect(await injected(page)).toContain('(throaty hum)');
+    expect(await injected(page)).not.toContain('[throaty hum]');
     const template = await field(page, 'prompt-template').inputValue();
     await field(page, 'vocal-events').fill('[喘气]\n[轻笑]');
     await expect.poll(() => field(page, 'prompt-preview').inputValue()).toContain('[喘气], [轻笑]');
@@ -78,7 +79,8 @@ test('vocal-event list starts with 47 defaults and updates both preview and inje
     await field(page, 'reset-vocal-events').click();
     await expect(field(page, 'vocal-events')).toHaveValue(defaults);
     expect(await injected(page)).toContain('(clears throat)');
-    expect(await injected(page)).toContain('[throaty hum]');
+    expect(await injected(page)).toContain('(throaty hum)');
+    expect(await injected(page)).not.toContain('[throaty hum]');
     expect(await injected(page)).toContain('[TTSVoice:周启明:softly reassuring:[笑]');
     expect(await injected(page)).toBe(await field(page, 'prompt-preview').inputValue());
     expect(errors).toEqual([]);
@@ -103,11 +105,18 @@ test('parenthesized and adjacent vocal events reach the live prompt unchanged wh
 
 for (const [label, oldValue, expectedValue] of [
     ['exact original defaults', previousDefaults, defaults],
+    ['previous mixed 47-event defaults', PREVIOUS_DEFAULT_VOCAL_EVENTS, defaults],
     ['custom list', '(gasp)\n[whimper][needy moan]', '(gasp)\n[whimper][needy moan]'],
     ['explicitly empty list', '', ''],
     ['reordered original tags', '[叹气]\n[笑]\n[咳嗽]\n[清嗓子]', '[叹气]\n[笑]\n[咳嗽]\n[清嗓子]'],
 ]) {
     test(`initialization migrates only exact old defaults and preserves ${label}`, async ({ page }) => {
+        if (label === 'previous mixed 47-event defaults') {
+            expect(oldValue.trim().split('\n')).toHaveLength(47);
+            expect(oldValue).toContain('[soft gasps]');
+            expect(oldValue).toContain('[throaty hum]');
+            expect(oldValue).toContain('(clears throat)');
+        }
         const before = await page.evaluate(value => {
             const demo = window.__breezeDemo;
             demo.context.extensionSettings.breeze_voice.vocalEvents = value;

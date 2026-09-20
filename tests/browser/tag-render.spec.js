@@ -69,11 +69,11 @@ test('round and square vocal events stay in speech requests while unknown parent
     await openStudio(page, 'prompt');
     await studio(page).locator('[data-vocal-events]').fill('(quiet laugh)\n[small sigh]');
     await studio(page).locator('[data-close]').click();
-    const text = '(laugh)[soft gasps]你好。(quiet laugh)[small sigh]等一下(约5分钟)，再看[附注(laugh)]。';
+    const text = '(laugh)(soft gasps)你好。(quiet laugh)[small sigh]等一下(约5分钟)，再看[附注(laugh)]。';
     const raw = `[TTSVoice:周启明:default:${text}]`;
     await replaceMessage(page, raw);
     await expect(body(page)).toContainText('“你好。等一下(约5分钟)，再看[附注(laugh)]。”');
-    expect(await body(page).innerText()).not.toContain('[soft gasps]');
+    expect(await body(page).innerText()).not.toContain('(soft gasps)');
     expect(await body(page).innerText()).not.toContain('(quiet laugh)');
     await expect(bubbles(page)).toHaveCount(1);
     await bubbles(page).click();
