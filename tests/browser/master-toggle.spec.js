@@ -76,28 +76,33 @@ test('settings and floating switches share one enabled state and clear injection
     await expect(setting(page, 'enabled')).toBeChecked();
 });
 
-test('the compact mobile switch remains reachable without speech and preserves its state on reload', async ({ page }) => {
+test('the mobile compact button opens the panel before changing the saved master switch', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
     await replaceMessage(page, '没有语音标签的普通回复。');
     await expect(page.locator('#chat .breeze-bubble')).toHaveCount(0);
     await expectDisabledPlayback(page);
     await master(page).click();
     await panel(page).getByRole('button', { name: '收起语音面板', exact: true }).click();
-    await expect(master(page)).toHaveCount(1);
-    await expect(master(page)).toBeInViewport();
-    await expect(master(page)).toHaveAttribute('aria-checked', 'false');
+    await expect(master(page)).toHaveCount(0);
+    await expect(panel(page).locator('[data-expand]')).toHaveText('Breeze');
+    await expect(panel(page).locator('[data-expand]')).toBeInViewport();
     await page.reload();
     await expect(panel(page).getByRole('button', { name: '展开语音面板', exact: true })).toBeVisible();
+    await expect(master(page)).toHaveCount(0);
+    expect(await prompt(page)).toBe('');
+    await page.screenshot({ path: 'test-results/master-toggle-compact-375.png' });
+    await panel(page).getByRole('button', { name: '展开语音面板', exact: true }).focus();
+    await page.keyboard.press('Space');
     await expect(master(page)).toHaveAttribute('aria-checked', 'false');
     await expect(master(page)).toBeInViewport();
+    await expectDisabledPlayback(page);
     await master(page).focus();
     await page.keyboard.press('Space');
     await expect(master(page)).toHaveAttribute('aria-checked', 'true');
     await expect.poll(() => prompt(page)).toContain('TTSVoice');
-    await page.screenshot({ path: 'test-results/master-toggle-compact-375.png' });
-    await panel(page).getByRole('button', { name: '展开语音面板', exact: true }).click();
     await expect(control(page, 'play')).toBeEnabled();
     await expect(master(page)).toHaveAttribute('aria-checked', 'true');
+    await page.screenshot({ path: 'test-results/master-toggle-expanded-375.png' });
 });
 
 test('off survives generation, presets, chat changes and reload without changing saved prompt or voice preferences', async ({ page, request }) => {

@@ -1,11 +1,11 @@
 {
   "name": "sillytavern-breeze",
   "private": true,
-  "version": "0.7.0-tag-render.14",
+  "version": "0.7.0-tag-render.15",
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check text-filters.js && node --check text-filter-editor.js && node --check index.js && node --check floating-controls.js && node --check narration.js && node --check dialogue-render.js && node --check core.js && node --check client.js && node --check automatic-queue.js && node --check player.js && node --check stream-player.js && node --check prompt.js && node --check extra-prompts.js && node --check panel.js && node --check menu.js",
+    "check": "node --check text-filters.js && node --check text-filter-editor.js && node --check index.js && node --check floating-controls.js && node --check floating-position.js && node --check narration.js && node --check dialogue-render.js && node --check core.js && node --check client.js && node --check automatic-queue.js && node --check player.js && node --check stream-player.js && node --check prompt.js && node --check extra-prompts.js && node --check panel.js && node --check menu.js",
     "preview": "node tools/preview-server.mjs",
     "test:browser": "playwright test"
   },

@@ -11,6 +11,7 @@ const timeline = page => panel(page).getByRole('slider', { name: '本条语音�
 const collapse = page => panel(page).getByRole('button', { name: '收起语音面板', exact: true });
 const expand = page => panel(page).getByRole('button', { name: '展开语音面板', exact: true });
 const state = async request => (await request.get('/__demo/state')).json();
+const savedPosition = page => page.evaluate(() => window.__breezeDemo.context.extensionSettings.breeze_voice.floatingControlsPosition);
 const speech = text => `[TTSVoice:周启明:default:${text}]`;
 const audioState = page => page.evaluate(() => {
     const audio = window.__floatingAudio.at(-1);
@@ -48,6 +49,39 @@ async function seek(page, percent) {
         node.dispatchEvent(new Event('input', { bubbles: true }));
         node.dispatchEvent(new Event('change', { bubbles: true }));
     }, percent);
+}
+
+async function drag(page, handle, dx, dy, { x, y } = {}) {
+    const box = await handle.boundingBox();
+    const from = { x: box.x + (x ?? box.width / 2), y: box.y + (y ?? box.height / 2) };
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx, from.y + dy, { steps: 12 });
+    await page.mouse.up();
+}
+
+async function touchDragTo(page, handle, x, y) {
+    const box = await handle.boundingBox();
+    const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const session = await page.context().newCDPSession(page);
+    try {
+        await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...from, id: 1 }] });
+        for (let step = 1; step <= 12; step++) {
+            await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{
+                x: from.x + (x - from.x) * step / 12,
+                y: from.y + (y - from.y) * step / 12, id: 1,
+            }] });
+        }
+        await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } finally { await session.detach(); }
+}
+
+async function expectInsideViewport(page) {
+    await expect.poll(async () => {
+        const box = await panel(page).boundingBox(), viewport = page.viewportSize();
+        return box && box.x >= 0 && box.y >= 0
+            && box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1;
+    }).toBe(true);
 }
 
 test.beforeEach(async ({ page, request }) => {
@@ -112,6 +146,91 @@ test('collapse and expand preserve playback and the chosen presentation survives
     await page.reload();
     await expect(collapse(page)).toBeVisible();
     await expect(target(page)).toHaveValue('');
+});
+
+test('the compact Breeze button drags without opening, toggling, or starting playback', async ({ page, request }) => {
+    await collapse(page).click();
+    await expect(expand(page)).toHaveText('Breeze');
+    await expect(panel(page).locator('[data-master-toggle]:visible')).toHaveCount(0);
+    await expect(expand(page).locator('svg')).toHaveCount(0);
+    const before = await expand(page).boundingBox();
+    expect(before.width).toBeLessThan(125);
+    await drag(page, expand(page), -260, -155);
+    const after = await expand(page).boundingBox();
+    expect(Math.abs(after.x - (before.x - 260))).toBeLessThan(2);
+    expect(Math.abs(after.y - (before.y - 155))).toBeLessThan(2);
+    await expect(expand(page)).toBeVisible();
+    await expect(collapse(page)).toBeHidden();
+    expect(await page.evaluate(() => window.__breezeDemo.context.extensionSettings.breeze_voice.enabled)).toBe(true);
+    expect((await state(request)).requests).toEqual([]);
+    await expect.poll(() => savedPosition(page)).toEqual(expect.objectContaining({
+        right: expect.any(Number), bottom: expect.any(Number),
+    }));
+    const position = await savedPosition(page);
+    expect(Math.abs(position.right - (page.viewportSize().width - after.x - after.width))).toBeLessThan(1);
+    expect(Math.abs(position.bottom - (page.viewportSize().height - after.y - after.height))).toBeLessThan(1);
+    await page.screenshot({ path: 'test-results/floating-drag-compact-desktop.png' });
+    await expand(page).click();
+    await expect(collapse(page)).toBeVisible();
+    await expect(panel(page).locator('[data-master-toggle]:visible')).toHaveCount(1);
+    await expectInsideViewport(page);
+});
+
+test('the header moves the expanded panel while buttons and the playback slider keep their own interactions', async ({ page, request }) => {
+    const header = panel(page).locator('[data-drag-handle]');
+    const before = await panel(page).boundingBox();
+    await drag(page, header, -230, -80, { x: 35, y: 22 });
+    const after = await panel(page).boundingBox();
+    expect(Math.abs(after.x - (before.x - 230))).toBeLessThan(2);
+    expect(Math.abs(after.y - (before.y - 80))).toBeLessThan(2);
+    const position = await savedPosition(page);
+    expect(position).toEqual(expect.objectContaining({ right: expect.any(Number), bottom: expect.any(Number) }));
+    for (const button of [panel(page).locator('[data-master-toggle]'), collapse(page)]) {
+        await drag(page, button, -65, 65);
+        expect(await savedPosition(page)).toEqual(position);
+    }
+    await expect(collapse(page)).toBeVisible();
+    await expect(panel(page).locator('[data-master-toggle]')).toHaveAttribute('aria-checked', 'true');
+    expect((await state(request)).requests).toEqual([]);
+    await drag(page, timeline(page), -35, 0);
+    expect(await savedPosition(page)).toEqual(position);
+    await expect(stop(page)).toBeEnabled();
+    await stop(page).click();
+    await page.screenshot({ path: 'test-results/floating-drag-expanded-desktop.png' });
+});
+
+test('a saved dragged position survives reload and clamps after shrinking the viewport', async ({ page }) => {
+    await drag(page, panel(page).locator('[data-drag-handle]'), -670, -240, { x: 35, y: 22 });
+    const position = await savedPosition(page), before = await panel(page).boundingBox();
+    await page.reload();
+    await expect(collapse(page)).toBeVisible();
+    await expect.poll(() => savedPosition(page)).toEqual(position);
+    const after = await panel(page).boundingBox();
+    expect(Math.abs(after.x - before.x)).toBeLessThan(2);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(2);
+    await page.setViewportSize({ width: 375, height: 640 });
+    await expectInsideViewport(page);
+    await page.reload();
+    await expect(collapse(page)).toBeVisible();
+    await expectInsideViewport(page);
+});
+
+test('mobile touch dragging and expanding at an edge keep the complete panel in view', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 740 });
+    await collapse(page).click();
+    const compact = await expand(page).boundingBox();
+    expect(compact.width).toBeLessThan(125);
+    await touchDragTo(page, expand(page), 4, 4);
+    await expect(expand(page)).toBeVisible();
+    await expectInsideViewport(page);
+    await expect(expand(page)).toHaveText('Breeze');
+    await page.screenshot({ path: 'test-results/floating-drag-compact-mobile.png' });
+    await expand(page).click();
+    await expect(collapse(page)).toBeVisible();
+    await expectInsideViewport(page);
+    await expect(panel(page).locator('[data-master-toggle]')).toBeInViewport();
+    await expect(refresh(page)).toBeInViewport();
+    await page.screenshot({ path: 'test-results/floating-drag-expanded-mobile.png' });
 });
 
 test('selecting an older assistant reply plays its speech and follow-latest skips user messages', async ({ page, request }) => {

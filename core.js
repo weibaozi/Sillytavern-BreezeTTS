@@ -4,6 +4,7 @@ export const KEY = 'breeze_voice';
 export const DEFAULTS = Object.freeze({
     enabled: true, baseUrl: 'http://127.0.0.1:7860', autoGenerate: false,
     autoPlay: false, streaming: false, readStreamingText: false, floatingControlsCollapsed: false, volume: 0.8, hideTags: true, cfgScale: 4, seed: 42,
+    floatingControlsPosition: null,
     textFilters: DEFAULT_TEXT_FILTERS,
 });
 

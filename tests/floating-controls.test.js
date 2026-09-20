@@ -42,12 +42,13 @@ test('floating controls remain a singleton and collapse without triggering playb
     assert.equal(expand.hidden, false);
     assert.equal(root.activeElement, expand);
     assert.equal(expand.getAttribute('aria-expanded'), 'false');
-    assert.match(expand.textContent, /Breeze.*待播放/);
+    assert.equal(expand.textContent, 'Breeze');
     controls.update({ status: '播放中', active: true, visible: false });
     assert.equal(controls.host.hidden, true);
     controls.update({ visible: true });
     assert.equal(panel.hidden, true, 'visibility and playback updates retain the collapse preference');
-    assert.match(expand.textContent, /播放中/);
+    assert.equal(expand.textContent, 'Breeze');
+    assert.match(expand.title, /播放中/);
     expand.click();
     assert.equal(panel.hidden, false);
     assert.equal(root.activeElement, collapse);
@@ -107,44 +108,38 @@ test('floating controls render hostile labels as text and disable all actions wi
     assert.equal(document.querySelector('#breeze-floating-controls'), null, 'updates cannot resurrect a destroyed panel');
 });
 
-test('master switches stay synchronized and remain usable without a reply in either layout', t => {
+test('the master switch stays inside the expanded panel and can be reached again when disabled', t => {
     const toggles = [], collapses = [];
     const { controls, root } = setup(t, {
         onToggleEnabled: enabled => { toggles.push(enabled); controls.update({ enabled }); },
         onCollapse: collapsed => collapses.push(collapsed),
     });
     controls.update({ visible: true });
-    const [headerSwitch, compactSwitch] = root.querySelectorAll('[data-master-toggle]');
+    const headerSwitch = root.querySelector('[data-master-toggle]');
     const panel = root.querySelector('.breeze-floating-panel');
-    const compactGroup = root.querySelector('.breeze-floating-compact-group');
     const expand = root.querySelector('[data-expand]');
-    assert.equal(root.querySelectorAll('[data-master-toggle]').length, 2);
-    assert.equal(compactGroup.hidden, true);
-    for (const toggle of [headerSwitch, compactSwitch]) {
-        assert.equal(toggle.getAttribute('role'), 'switch');
-        assert.equal(toggle.getAttribute('aria-label'), 'Breeze 总开关');
-        assert.equal(toggle.getAttribute('aria-checked'), 'true', 'Breeze defaults to enabled');
-        assert.equal(toggle.disabled, false);
-        assert.equal(toggle.parentElement.closest('button'), null, 'switches are never nested in another button');
-    }
+    assert.equal(root.querySelectorAll('[data-master-toggle]').length, 1);
+    assert.ok(panel.contains(headerSwitch));
+    assert.equal(headerSwitch.getAttribute('role'), 'switch');
+    assert.equal(headerSwitch.getAttribute('aria-label'), 'Breeze 总开关');
+    assert.equal(headerSwitch.getAttribute('aria-checked'), 'true');
     headerSwitch.click();
-    assert.deepEqual(toggles, [false], 'master switch works before any reply exists');
+    assert.deepEqual(toggles, [false], 'master works without a reply');
     assert.equal(controls.host.hidden, false);
-    assert.equal(panel.hidden, false);
-    for (const toggle of [headerSwitch, compactSwitch]) assert.equal(toggle.getAttribute('aria-checked'), 'false');
+    assert.equal(headerSwitch.getAttribute('aria-checked'), 'false');
     assert.equal(root.querySelector('[data-status]').textContent, '已关闭');
-    assert.equal(root.querySelector('[data-compact-status]').textContent, '已关闭');
     root.querySelector('[data-collapse]').click();
     assert.equal(panel.hidden, true);
-    assert.equal(compactGroup.hidden, false);
-    assert.equal(compactSwitch.parentElement, expand.parentElement, 'compact master switch is next to the expand action');
-    compactSwitch.click();
-    assert.deepEqual(toggles, [false, true]);
-    assert.equal(panel.hidden, true, 'toggling from the compact view preserves collapse');
     assert.equal(expand.hidden, false);
-    assert.deepEqual(collapses, [true], 'the master switch does not trigger expand');
-    for (const toggle of [headerSwitch, compactSwitch]) assert.equal(toggle.getAttribute('aria-checked'), 'true');
-    assert.equal(root.querySelector('[data-compact-status]').textContent, '暂无可朗读回复');
+    assert.equal(expand.textContent, 'Breeze', 'compact view contains only the name');
+    assert.equal(expand.querySelectorAll('button, svg, [data-master-toggle]').length, 0);
+    expand.click();
+    assert.equal(panel.hidden, false, 'disabled Breeze can still be expanded');
+    assert.deepEqual(toggles, [false], 'expanding does not enable Breeze');
+    headerSwitch.click();
+    assert.deepEqual(toggles, [false, true]);
+    assert.equal(headerSwitch.getAttribute('aria-checked'), 'true');
+    assert.deepEqual(collapses, [true, false]);
     for (const button of root.querySelectorAll('.breeze-message-controls button')) assert.equal(button.disabled, true);
 });
 
@@ -164,7 +159,6 @@ test('disabled master switch blocks reply actions and cancels in-flight seeking'
     assert.equal(controls.host.dataset.state, 'disabled');
     assert.equal(root.querySelector('.breeze-message-controls').dataset.state, 'disabled');
     assert.equal(root.querySelector('[data-status]').textContent, '已关闭');
-    assert.equal(root.querySelector('[data-compact-status]').textContent, '已关闭');
     assert.equal(select.disabled, true);
     assert.equal(seek.disabled, true);
     assert.equal(seek.value, '10', 'disabling restores the authoritative seek position');

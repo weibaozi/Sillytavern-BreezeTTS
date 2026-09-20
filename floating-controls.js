@@ -1,3 +1,5 @@
+import { attachFloatingPosition } from './floating-position.js';
+
 const instances = new WeakMap();
 const isMessageId = value => Number.isInteger(value) && value >= 0;
 const clampPercent = value => Math.min(100, Math.max(0, Number(value) || 0));
@@ -10,7 +12,7 @@ const setText = (node, value) => {
 };
 
 /** An isolated view; the caller owns message selection, playback and saved preferences. */
-export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onSelect, onCollapse, onSeek, onToggleEnabled, collapsed = false } = {}) {
+export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onSelect, onCollapse, onSeek, onToggleEnabled, onPositionChange, position = null, collapsed = false } = {}) {
     const existing = instances.get(document);
     if (existing) {
         if (!existing.host.isConnected) document.body.append(existing.host);
@@ -29,7 +31,7 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
     // This shell is static. Message labels and feedback are always assigned as text.
     shell.innerHTML = `
       <section id="breeze-floating-panel" class="breeze-floating-panel" aria-label="Breeze 浮动语音控制">
-        <header class="breeze-floating-header">
+        <header class="breeze-floating-header" data-drag-handle title="拖动标题栏移动面板">
           <div class="breeze-floating-brand"><span class="breeze-floating-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><div><strong>Breeze</strong><span class="breeze-floating-caption">语音播放</span></div></div>
           <div class="breeze-floating-header-actions">
             <button class="breeze-floating-master" type="button" data-master-toggle role="switch" aria-label="Breeze 总开关" aria-checked="true" title="关闭 Breeze"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v7m-4-5a7 7 0 1 0 8 0"/></svg><span data-master-label>开</span></button>
@@ -54,15 +56,11 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
           </div>
         </div>
       </section>
-      <div class="breeze-floating-compact-group" hidden>
-        <button class="breeze-floating-compact" type="button" data-expand aria-label="展开语音面板" aria-expanded="false" aria-controls="breeze-floating-panel" title="展开语音面板" hidden><span class="breeze-floating-dot" aria-hidden="true"></span><strong>Breeze</strong><span data-compact-status>待播放</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 12 5-5 5 5"/></svg></button>
-        <button class="breeze-floating-master breeze-floating-master-compact" type="button" data-master-toggle role="switch" aria-label="Breeze 总开关" aria-checked="true" title="关闭 Breeze"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v7m-4-5a7 7 0 1 0 8 0"/></svg><span data-master-label>开</span></button>
-      </div>`;
+      <button class="breeze-floating-compact" type="button" data-expand aria-label="展开语音面板" aria-expanded="false" aria-controls="breeze-floating-panel" title="点击展开，拖动移动" hidden><strong>Breeze</strong></button>`;
     root.append(stylesheet, shell);
     const panel = root.querySelector('.breeze-floating-panel');
     const collapseButton = root.querySelector('[data-collapse]');
     const expandButton = root.querySelector('[data-expand]');
-    const compactGroup = root.querySelector('.breeze-floating-compact-group');
     const masterToggles = [...root.querySelectorAll('[data-master-toggle]')];
     const select = root.querySelector('select');
     const controls = root.querySelector('.breeze-message-controls');
@@ -71,7 +69,6 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
     const stop = root.querySelector('.breeze-message-stop');
     const refresh = root.querySelector('.breeze-message-refresh');
     const status = root.querySelector('[data-status]');
-    const compactStatus = root.querySelector('[data-compact-status]');
     const label = root.querySelector('[data-target-label]');
     const feedback = root.querySelector('.breeze-message-feedback');
     const seek = root.querySelector('[data-seek]');
@@ -95,11 +92,14 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
         node.addEventListener(event, listener);
         listeners.push([node, event, listener]);
     };
+    const positionController = attachFloatingPosition({
+        host, handles: [root.querySelector('[data-drag-handle]'), expandButton], position, onPositionChange,
+    });
     const renderCollapsed = () => {
         panel.hidden = isCollapsed;
-        compactGroup.hidden = !isCollapsed;
         expandButton.hidden = !isCollapsed;
         host.dataset.collapsed = String(isCollapsed);
+        positionController.refresh();
     };
     const changeCollapsed = value => {
         isCollapsed = value;
@@ -108,7 +108,9 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
         onCollapse?.(isCollapsed);
     };
     listen(collapseButton, 'click', () => changeCollapsed(true));
-    listen(expandButton, 'click', () => changeCollapsed(false));
+    listen(expandButton, 'click', event => {
+        if (!positionController.consumeClick(event)) changeCollapsed(false);
+    });
     for (const toggle of masterToggles) listen(toggle, 'click', () => onToggleEnabled?.(!current.enabled));
     listen(select, 'change', () => {
         if (select.disabled) return;
@@ -212,15 +214,16 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
             setText(refresh, current.refreshLabel || (current.refreshing ? '↻ 重新获取中' : '↻ 重新获取'));
             const statusText = !enabled ? '已关闭' : current.status || (current.refreshing ? '重新获取中' : current.paused ? '已暂停' : current.active ? '播放中' : hasTarget ? '待播放' : '暂无可朗读回复');
             setText(status, statusText);
-            setText(compactStatus, statusText);
-            compactStatus.title = String(statusText);
+            expandButton.title = `点击展开，拖动移动 · ${statusText}`;
             setText(label, current.label);
             label.title = String(current.label ?? '');
             setText(feedback, current.feedback);
+            positionController.refresh();
         },
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            positionController.destroy();
             for (const [node, event, listener] of listeners) node.removeEventListener(event, listener);
             host.remove();
             instances.delete(ownerDocument);
@@ -229,6 +232,7 @@ export function createFloatingControls({ onPlay, onPause, onStop, onRefresh, onS
     renderCollapsed();
     api.update({});
     document.body.append(host);
+    positionController.refresh();
     instances.set(ownerDocument, api);
     return api;
 }

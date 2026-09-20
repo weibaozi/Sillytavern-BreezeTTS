@@ -1029,6 +1029,8 @@ function init() {
     buildPanel();
     floatingControls = createFloatingControls({
         collapsed: settings.floatingControlsCollapsed === true,
+        position: settings.floatingControlsPosition,
+        onPositionChange: position => { settings.floatingControlsPosition = position; saveSettings(); },
         onToggleEnabled: setEnabled,
         onPlay: playMessage,
         onPause: messageId => { void player.togglePause().catch(error => playbackError(error, messageId)); },
