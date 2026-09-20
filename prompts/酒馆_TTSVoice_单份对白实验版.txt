@@ -4,24 +4,24 @@ Preserve the existing prose style, output language, and all unrelated preset req
 
 1. Write each eligible spoken utterance ONLY ONCE, inside one separate plain-text line:
 [TTSVoice:Character_Name:emotion:Spoken dialogue]
-The plugin displays its dialogue as readable quoted speech. Do not repeat the same speech in ordinary quotation marks outside the tag. Keep natural novel-style narration around it; no "Name:" prefix is required.
+The tag IS the spoken line; the plugin renders it as quoted dialogue. In the story body, never echo it before or after the tag, with or without quotation marks, or in a second tag. This single-copy rule replaces older double-copy instructions or examples for speech only. Continue the scene without replaying earlier dialogue unless the character deliberately repeats it in context. Keep natural narration; no "Name:" prefix is required.
 
 2. Keep narration, actions, and thoughts outside TTSVoice. Do not tag {{user}}'s speech, unspoken quotations, text messages, or content in <w2g>, <catsay>, summaries, and status panels. Skipped speech remains ordinary prose. Tags belong inside the story body; tag delimiters, speaker names, and emotion fields are metadata, not prose. Keep every other format module and its order unchanged.
 
 3. Use one exact, consistent character name in every tag, never pronouns or changing nicknames. Voice-profile names never replace character names.
-- Bound characters (use a short, natural emotion description; default for neutral delivery):
+- Bound characters (use a concise emotion word or short delivery phrase; default for neutral delivery):
 {{bound_characters_section}}
 - Skipped characters (ordinary prose only; no TTS tag):
 {{skipped_characters_section}}
 - New / unbound characters: use emotion New, including these known unbound characters:
 {{unbound_characters_section}}
-Emotion should follow the scene naturally, without abrupt extremes.
+For bound characters, choose the word or short phrase that best fits their personality, relationship to the listener, and immediate context, such as softly reassuring or playful but hesitant. Keep it brief and focused on audible delivery, with natural emotional continuity rather than abrupt extremes; no action descriptions.
 
 4. Inside spoken dialogue, optionally add only these allowed audible events at the intended position: {{vocal_events}}. Keep event tags unchanged; if none are allowed, add no vocal-event tags. Use them sparingly; a smile alone is not audible laughter. No silent actions.
 
-5. Use the exact prefix TTSVoice. Names and emotions contain no colons, square brackets, or line breaks. Inside the dialogue field, write only spoken words and allowed audible events: no outer quotation marks, Markdown, or narration. Preserve normal punctuation. Close every inner event bracket before the outer TTSVoice bracket; each complete tag occupies one line, without bold or code fences. Complete each utterance's tag before continuing. Short replies, consecutive remarks, questions, and closing lines all follow this rule. Before any post-body module, silently check all eligible speech, especially the penultimate and final utterances; fix missing tags in place without adding duplicate dialogue or printing the check.
+5. Use the exact prefix TTSVoice. Names and emotions contain no colons, square brackets, or line breaks. Inside the dialogue field, write only spoken words and allowed audible events: no outer quotation marks, Markdown, or narration. Preserve normal punctuation. Close every inner event bracket before the outer TTSVoice bracket; each complete tag occupies one line, without bold or code fences. Complete each utterance's tag once before continuing. Short replies, consecutive remarks, questions, and closing lines all follow this rule. Before any post-body module, silently check that each eligible utterance has exactly one tag, especially the penultimate and final utterances. No prose copies, duplicate tags, repeated passages, or appended correction transcripts. Do not print the check.
 
 Example (a bound speaker):
 周启明抬起手。
-[TTSVoice:周启明:happy:{{vocal_event_example}}等一下。现在可以了。]
+[TTSVoice:周启明:softly reassuring:{{vocal_event_example}}等一下。现在可以了。]
 他合上本子。

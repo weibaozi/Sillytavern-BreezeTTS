@@ -1,4 +1,4 @@
-# Breeze 角色语音 · 0.7.0-tag-render.2（实验版）
+# Breeze 角色语音 · 0.7.0-tag-render.3（实验版）
 
 分支 `experiment/ttsvoice-render` 从 `stable/v0.6.1` / 标签 `v0.6.1` 的提交 `60df1f8` 分出。不要与稳定版并装或同时启用，两者共用设置、事件和提示词 key。已有单份对白版可直接更新同名扩展并刷新酒馆。
 
@@ -29,10 +29,12 @@
 .\install.ps1 -SillyTavernPath 'G:\study\AI\SillyTavern-Launcher\SillyTavern' -InstallExperimental
 ```
 
-脚本需要显式实验开关，先备份再替换同名扩展。包名为 `dist/sillytavern-breeze-0.7.0-tag-render.2.zip`；部署应包含 `dialogue-render.js`、`automatic-queue.js` 等全部文件，刷新酒馆生效，从 0.6.1 试用无需重启已有配套后端。
+脚本需要显式实验开关，先备份再替换同名扩展。包名为 `dist/sillytavern-breeze-0.7.0-tag-render.3.zip`；部署应包含 `dialogue-render.js`、`automatic-queue.js` 等全部文件，刷新酒馆生效，从 0.6.1 试用无需重启已有配套后端。
 
 回退时从稳定源码目录重新安装并刷新，原模板仍保留。实验期间创建的单份消息不会自动转成双份；稳定版可能只显示它们的气泡，原文对白仍在。
 
 前版 0.7.0-tag-render.1 通过 70 项单元／DOM 测试、35 项不同浏览器用例及语法检查，使用模拟酒馆与演示音频；本次回归结果以测试记录为准，未验证真实模型遵循率。完整说明见源码 README 与 `docs/单份对白方案.md`。
 
-本版 0.7.0-tag-render.2 已通过 83 项单元／DOM 测试、48 项 Edge 浏览器用例及 JavaScript 语法检查，覆盖流式碎片、原文领先界面的时序、队列去重／取消、流式与非流式续写，以及原生主题色。浏览器使用模拟酒馆和演示音频，未据此判断真实模型听感。
+0.7.0-tag-render.3 仅更新英文提示词：强化单份对白，允许贴合角色与语境的简短情绪短语。24 项预设／DOM 测试及 JavaScript 语法检查通过；未重新运行浏览器全套用例，未测真实模型遵循率。
+
+前版 0.7.0-tag-render.2 已通过 83 项单元／DOM 测试、48 项 Edge 浏览器用例及 JavaScript 语法检查，覆盖流式碎片、原文领先界面的时序、队列去重／取消、流式与非流式续写，以及原生主题色。浏览器使用模拟酒馆和演示音频，未据此判断真实模型听感。

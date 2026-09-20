@@ -1,4 +1,4 @@
-# 酒馆 × Breeze TTS 实施计划 · 0.7.0-tag-render.2
+# 酒馆 × Breeze TTS 实施计划 · 0.7.0-tag-render.3
 
 状态：`experiment/ttsvoice-render` 已实现单份 TTSVoice 渲染；前版已安装，本次新增读取流式文本与原生引号主题样式。稳定分支 `stable/v0.6.1` 与标签 `v0.6.1` 保留在 `60df1f8`。2026-09-19。
 

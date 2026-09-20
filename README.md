@@ -1,4 +1,4 @@
-# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.2（实验分支）
+# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.3（实验分支）
 
 模型只写一份 `[TTSVoice:角色名:情绪:对白]`，插件在显示层把它呈现为普通引号对白和播放气泡。原始聊天 `mes` 保持不变，已绑定角色连接原 Breeze WebUI 合成及播放；未绑定角色仍显示对白，仅跳过语音。原有独立工作室、音色库、流式播放、语气词设置和共享语料库保留。
 
@@ -22,7 +22,7 @@
    G:\study\AI\SillyTavern-Launcher\SillyTavern\data\default-user\extensions\sillytavern-breeze\
    ```
 
-   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.2.zip`。
+   目录下应直接包含 `manifest.json`、`index.js`、`dialogue-render.js`、`automatic-queue.js`、`panel.js`、`panel.css`、`stream-player.js`、`extra-prompts.js` 等文件。其他酒馆用户使用其自己的用户目录，可通过 `-UserHandle` 指定。实验包为 `dist/sillytavern-breeze-0.7.0-tag-render.3.zip`。
 
    ```powershell
    .\install.ps1 -SillyTavernPath 'G:\study\AI\SillyTavern-Launcher\SillyTavern' -InstallExperimental
@@ -104,7 +104,9 @@
 
 ## 验证状态
 
-本版 0.7.0-tag-render.2 已通过 83 项单元／DOM 测试、48 项 Edge 浏览器用例及 JavaScript 语法检查，覆盖流式碎片、原文领先界面的时序、队列去重／取消、流式与非流式续写，以及原生主题色。浏览器使用模拟酒馆和演示音频，未据此判断真实模型听感。
+0.7.0-tag-render.3 仅更新英文提示词：强化单份对白，允许贴合角色与语境的简短情绪短语。24 项预设／DOM 测试及 JavaScript 语法检查通过；未重新运行浏览器全套用例，未测真实模型遵循率。
+
+前版 0.7.0-tag-render.2 已通过 83 项单元／DOM 测试、48 项 Edge 浏览器用例及 JavaScript 语法检查，覆盖流式碎片、原文领先界面的时序、队列去重／取消、流式与非流式续写，以及原生主题色。浏览器使用模拟酒馆和演示音频，未据此判断真实模型听感。
 
 0.7.0-tag-render.1 通过 **70 项单元／DOM 测试、35 项不同的 Edge 浏览器用例及 JavaScript 语法检查**。浏览器使用模拟酒馆和演示音频；桌面聊天与 375px 手机预设界面已目视检查。初次建分支时还验证了安装保护、稳定源码及归档；随后已在本地安装试用。0.7.0-tag-render.2 的流式文字与队列回归结果以本次测试记录为准。真实模型的单份输出遵循率及实际酒馆完整流程尚未验收。
 

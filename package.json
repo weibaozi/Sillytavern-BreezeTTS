@@ -1,7 +1,7 @@
 {
   "name": "sillytavern-breeze",
   "private": true,
-  "version": "0.7.0-tag-render.2",
+  "version": "0.7.0-tag-render.3",
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
