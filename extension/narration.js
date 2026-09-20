@@ -10,40 +10,14 @@ export function normalizeNarrationTargetChars(value) {
 
 // Offsets always refer to the original message, even when formatting is hidden.
 // A hard exclusion ends a narration fragment; soft formatting stays inside it.
-const SOFT = 1, EXCLUDED = 2, PENDING = 3;
-const EXTRA_MODULE = /<\/?(ai_last_output|blockquote|q|statusbar|character_status)\b[^>]*>/gi;
+const SOFT = 1, EXCLUDED = 2, PENDING = 3, LINE_BREAK = 4;
+const EXTRA_MODULE = /<\/?(ai_last_output|statusbar|character_status)\b[^>]*>/gi;
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '…', mdash: '—', ndash: '–' };
 
 function decodeEntity(all, entity) {
     if (entity[0] !== '#') return ENTITIES[entity.toLowerCase()] ?? all;
     const code = entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
     return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : '';
-}
-
-function visibleToken(raw, index) {
-    const entity = raw[index] === '&' && /^&(#x[\da-f]+|#\d+|[a-z]+);/i.exec(raw.slice(index));
-    return entity ? { char: decodeEntity(entity[0], entity[1]), length: entity[0].length } : { char: raw[index], length: 1 };
-}
-
-function quotedRanges(raw, mask) {
-    const pairs = { '“': '”', '‘': '’', '「': '」', '『': '』', '"': '"', "'": "'" };
-    for (let i = 0; i < raw.length; i++) {
-        if (mask[i]) continue;
-        const opener = visibleToken(raw, i);
-        if (!pairs[opener.char]) continue;
-        // Apostrophes in contractions/possessives are not spoken quotations.
-        if (opener.char === "'" && (/[\p{L}\p{N}]/u.test(raw[i - 1] ?? '') || /\s/.test(raw[i + opener.length] ?? ' '))) continue;
-        const close = pairs[opener.char];
-        let end = i + opener.length;
-        while (end < raw.length) {
-            const token = visibleToken(raw, end);
-            const apostrophe = close === "'" && /[\p{L}\p{N}]/u.test(raw[end - 1] ?? '') && /[\p{L}\p{N}]/u.test(raw[end + token.length] ?? '');
-            if (!mask[end] && token.char === close && raw[end - 1] !== '\\' && !apostrophe) { end += token.length; break; }
-            end += token.length;
-        }
-        mask.fill(EXCLUDED, i, end);
-        i = end - 1;
-    }
 }
 
 function closeBracket(raw, start, opener = '[', closer = ']') {
@@ -99,9 +73,10 @@ function markupMask(raw, streaming) {
             const end = raw.indexOf('>', i + 1);
             if (end < 0) { mask.fill(streaming ? PENDING : EXCLUDED, i); break; }
             const tag = raw.slice(i, end + 1);
-            // Line/block tags are boundaries; ordinary inline markup is silent.
-            const kind = /^<\/?(?:br|p|div|li|h[1-6])\b/i.test(tag) ? EXCLUDED : SOFT;
-            mask.fill(kind, i, end + 1);
+            // Visible block layout becomes an uncounted word separator, never
+            // an extra speech request. Inline quote containers keep their text.
+            mask.fill(SOFT, i, end + 1);
+            if (/^<\/?(?:br|p|div|li|h[1-6]|blockquote)\b/i.test(tag)) mask[i] = LINE_BREAK;
             i = end;
             continue;
         }
@@ -133,7 +108,12 @@ function markupMask(raw, streaming) {
         if (raw[end] === '[') {
             const referenceEnd = closeBracket(raw, end);
             if (referenceEnd < 0) { mask.fill(streaming ? PENDING : EXCLUDED, i); break; }
-            mask.fill(EXCLUDED, i, referenceEnd);
+            if (image) mask.fill(EXCLUDED, i, referenceEnd);
+            else {
+                mask[start] = SOFT;
+                mask[end - 1] = SOFT;
+                mask.fill(SOFT, end, referenceEnd);
+            }
             i = referenceEnd - 1;
         } else if (raw[end] === '(') {
             const destinationEnd = closeBracket(raw, end, '(', ')');
@@ -155,47 +135,55 @@ function markupMask(raw, streaming) {
         }
     }
 
-    // Reference images, bare URLs, and Markdown block quotations are not speech.
-    for (const match of raw.matchAll(/!?\[[^\]\r\n]*\]\[[^\]\r\n]*\]|^\s*>[^\r\n]*|^\s*\[[^\]\r\n]+\]:[^\r\n]*/gm)) {
+    // Reference destinations are metadata; visible link labels and quotations
+    // stay in narration. Images and code retain their existing exclusions.
+    for (const match of raw.matchAll(/^[ \t]*\[[^\]\r\n]+\]:[^\r\n]*/gm)) {
         mask.fill(EXCLUDED, match.index, match.index + match[0].length);
     }
     for (const match of raw.matchAll(/https?:\/\/[^\s<>"'\]。！？；，]+/g)) {
         if (!mask[match.index]) mask.fill(EXCLUDED, match.index, match.index + match[0].length);
     }
-    for (const match of raw.matchAll(/^\s*(?:#{1,6}\s*|[-+*]\s+|\d+[.)]\s+)/gm)) {
+    for (const match of raw.matchAll(/^[ \t]*(?:#{1,6}[ \t]*|[-+*][ \t]+|\d+[.)][ \t]+|(?:>[ \t]*)+)/gm)) {
         for (let i = match.index; i < match.index + match[0].length; i++) if (!mask[i]) mask[i] = SOFT;
     }
-    quotedRanges(raw, mask);
     return mask;
 }
 
 /** Extract only prose narration, ordered by original source position.
  * Adjacent sentences share a chunk up to the target's last complete sentence.
  * Streaming waits until the next sentence cannot fit before committing a chunk;
- * paragraphs and speech boundaries flush immediately. A long sentence remains
+ * only excluded speech/module boundaries flush immediately. Paragraph layout
+ * adds uncounted spaces. Ordinary quoted text is prose. A long sentence remains
  * whole, subject to the existing 5000-character request protection.
  */
 export function parseNarration(raw = '', userName = '', { streaming = false, targetChars = DEFAULT_NARRATION_TARGET_CHARS } = {}) {
     raw = String(raw);
-    void userName; // Every quoted/TTS utterance is excluded, regardless of speaker.
+    void userName; // Every TTS utterance is excluded, regardless of its speaker.
     const target = normalizeNarrationTargetChars(targetChars);
     const mask = markupMask(raw, streaming);
     const segments = [];
     // Each visible Unicode character keeps its original source extent. This
     // makes both length accounting and cuts independent of markup/entity width.
     let units = [];
-    const append = (char, start, end) => {
+    const append = (char, start, end, weight = 1) => {
         if (/\s/.test(char)) {
-            if (!units.length || units.at(-1).char === ' ') return;
+            if (!units.length) return;
+            if (units.at(-1).char === ' ') {
+                // A space adjoining a line break is still layout, not a word.
+                if (!weight) units.at(-1).weight = 0;
+                return;
+            }
             char = ' ';
         }
-        units.push({ char, start, end });
+        units.push({ char, start, end, weight });
     };
     const flush = complete => {
         let tail = units.length;
         while (tail > 0 && units[tail - 1].char === ' ') tail--;
         const boundaries = [];
+        const counts = [0];
         for (let i = 0; i < tail; i++) {
+            counts.push(counts[i] + units[i].weight);
             const char = units[i].char;
             if (/[。！？!?；;]/.test(char) || (char === '.' && (units[i + 1]?.char === ' ' || (complete && i + 1 === tail)))) boundaries.push(i + 1);
         }
@@ -203,10 +191,11 @@ export function parseNarration(raw = '', userName = '', { streaming = false, tar
         while (from < tail) {
             while (from < tail && units[from].char === ' ') from++;
             if (from >= tail) break;
-            const within = boundaries.filter(end => end > from && end <= from + target).at(-1);
+            const count = end => counts[end] - counts[from];
+            const within = boundaries.filter(end => end > from && count(end) <= target).at(-1);
             let to;
-            if (within && (tail > from + target || within === from + target)) to = within;
-            else if (tail > from + target) {
+            if (within && (count(tail) > target || count(within) === target)) to = within;
+            else if (count(tail) > target) {
                 const firstSentence = boundaries.find(end => end > from);
                 if (firstSentence && firstSentence <= from + 5000) to = firstSentence;
                 else if (tail >= from + 5000) to = from + 5000;
@@ -228,7 +217,8 @@ export function parseNarration(raw = '', userName = '', { streaming = false, tar
     };
     for (let i = 0; i < raw.length; i++) {
         if (mask[i] === PENDING) break;
-        if (mask[i] === EXCLUDED || raw[i] === '\n' || raw[i] === '\r') { flush(true); continue; }
+        if (mask[i] === EXCLUDED) { flush(true); continue; }
+        if (mask[i] === LINE_BREAK || raw[i] === '\n' || raw[i] === '\r') { append(' ', i, i + 1, 0); continue; }
         if (mask[i] === SOFT) continue;
         if (/[*_~`]/.test(raw[i])) continue;
         if (raw[i] === '\\' && /[\\`*_{}\[\]()#+.!~>-]/.test(raw[i + 1] ?? '')) {
@@ -247,7 +237,7 @@ export function parseNarration(raw = '', userName = '', { streaming = false, tar
         if (entity) {
             const decoded = decodeEntity(entity[0], entity[1]);
             if (decoded !== entity[0]) {
-                for (const char of decoded) append(char, i, i + entity[0].length);
+                for (const char of decoded) append(char, i, i + entity[0].length, /[\r\n]/.test(char) ? 0 : 1);
                 i += entity[0].length - 1;
                 continue;
             }

@@ -6,6 +6,7 @@ const controls = page => current(page).locator('.breeze-message-controls');
 const play = page => controls(page).locator('.breeze-message-play');
 const pause = page => controls(page).locator('.breeze-message-pause');
 const stop = page => controls(page).locator('.breeze-message-stop');
+const refresh = page => controls(page).locator('.breeze-message-refresh');
 const state = async request => (await request.get('/__demo/state')).json();
 const speech = text => `[TTSVoice:周启明:default:${text}]`;
 
@@ -28,10 +29,12 @@ async function configure(page, values) {
 async function replaceMessage(page, raw) {
     await page.evaluate(raw => {
         const demo = window.__breezeDemo, id = demo.context.chat.length - 1;
+        for (const tray of document.querySelectorAll(`.mes[mesid="${id}"] .breeze-tray`)) tray.dataset.fixtureStale = 'true';
         demo.context.chat[id].mes = raw;
         document.querySelector(`.mes[mesid="${id}"] .mes_text`).textContent = raw;
         demo.emit('MESSAGE_UPDATED', id);
     }, raw);
+    await expect(current(page).locator('.breeze-tray[data-fixture-stale]')).toHaveCount(0);
     await expect(current(page).locator('.breeze-bubble')).toHaveCount(raw.split('[TTSVoice:').length - 1);
 }
 
@@ -67,7 +70,7 @@ test.beforeEach(async ({ page, request }) => {
     });
     await page.goto('/');
     await expect(current(page).locator('.breeze-bubble').first()).toHaveAttribute('data-state', 'idle');
-    await expect(controls(page).locator('button')).toHaveCount(3);
+    await expect(controls(page).locator('button')).toHaveCount(4);
 });
 
 for (const width of [1440, 375]) {
@@ -98,7 +101,10 @@ for (const width of [1440, 375]) {
             return bounds;
         };
         const initial = await check();
-        expect(initial.every(button => button.top === initial[0].top)).toBe(true);
+        if (width > 375) expect(initial.every(button => button.top === initial[0].top)).toBe(true);
+        else expect(initial[1].top).toBe(initial[0].top);
+        await refresh(page).evaluate(node => { node.textContent = '重新获取中 99/100'; node.disabled = true; });
+        await check();
         await controls(page).evaluate(node => { node.style.maxWidth = '165px'; });
         const wrapped = await check();
         expect(wrapped.some(button => button.top > wrapped[0].top)).toBe(true);
@@ -113,7 +119,7 @@ test('narration chunk target fits the studio and exposes its range and default o
     await expect(input).toHaveAttribute('min', '20');
     await expect(input).toHaveAttribute('max', '1000');
     await expect(input).toHaveAttribute('step', '1');
-    await expect(input).toHaveAccessibleName('旁白切片目标字数 目标内按最后完整句子切分，单句过长保留整句；段落与对白边界分开。');
+    await expect(input).toHaveAccessibleName('旁白切片目标字数 跨换行累计，目标内按最后完整句子切分；单句过长保留整句。普通引号内容也由旁白朗读。');
     const bounds = await input.evaluate(node => ({ left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right }));
     expect(bounds.left).toBeGreaterThanOrEqual(0);
     expect(bounds.right).toBeLessThanOrEqual(375);
@@ -199,3 +205,122 @@ test('automatic streamed batches preserve pause while new text arrives and acros
     await stop(page).click();
     await expect(stop(page)).toBeDisabled();
 });
+
+test('refresh replaces cached character and narrator speech, repeats equal entries, skips unmapped speakers and never autoplays', async ({ page, request }) => {
+    await openStudio(page);
+    await studio(page).locator('[data-narrator-voice]').selectOption('3'.repeat(32));
+    await studio(page).locator('[data-close]').click();
+    const raw = ['晨光照进教室。', speech('同一句话。'), speech('同一句话。'),
+        '[TTSVoice:林知夏:default:我来回答。]', '[TTSVoice:沈予安:New:这个角色还未绑定。]', '他们收起课本。'].join('\n');
+    await replaceMessage(page, raw);
+    await page.evaluate(() => {
+        const originalPlay = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function (...args) { this.playbackRate = 4; return originalPlay.apply(this, args); };
+    });
+    await play(page).click();
+    await expect.poll(async () => (await state(request)).requests.length).toBe(4);
+    await expect(stop(page)).toBeDisabled();
+    const original = await state(request);
+    const originalIds = original.requests.map(job => job.id);
+    const audioCount = await page.evaluate(() => window.__controlsAudio.length);
+    expect(audioCount).toBe(5);
+
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    let gated = false;
+    await page.route('**/breeze/jobs', async route => {
+        const response = await route.fetch();
+        if (!gated) { gated = true; await held; }
+        await route.fulfill({ response });
+    });
+    await refresh(page).click();
+    await expect(refresh(page)).toBeDisabled();
+    await expect(refresh(page)).toHaveText(/重新获取中\s+0\/5/);
+    await expect(controls(page)).toHaveAttribute('data-state', 'refreshing');
+    await expect(stop(page)).toBeEnabled();
+    await expect(pause(page)).toBeDisabled();
+    release();
+    await expect(refresh(page)).toBeEnabled();
+    await expect(refresh(page)).toHaveText('↻ 重新获取');
+    await expect(controls(page).locator('.breeze-message-feedback')).toHaveText('已重新获取 5 段语音。');
+    const after = await state(request), refreshed = after.requests.slice(original.requests.length);
+    expect(refreshed.map(job => [job.text, job.voice_id])).toEqual([
+        ['晨光照进教室。', '3'.repeat(32)], ['同一句话。', '1'.repeat(32)], ['同一句话。', '1'.repeat(32)],
+        ['我来回答。', '2'.repeat(32)], ['他们收起课本。', '3'.repeat(32)],
+    ]);
+    expect(new Set(refreshed.map(job => job.id)).size).toBe(5);
+    expect(refreshed.every(job => !job.stream)).toBe(true);
+    const cacheIds = await page.evaluate(() => Object.values(window.__breezeDemo.context.chatMetadata.breeze_voice.cache).map(record => record.id));
+    expect(cacheIds).toHaveLength(4);
+    expect(cacheIds.some(id => originalIds.includes(id))).toBe(false);
+    expect(cacheIds).toContain(refreshed[2].id);
+    expect(await page.evaluate(() => window.__controlsAudio.length)).toBe(audioCount);
+    expect(await page.evaluate(() => window.__controlsStarts.length)).toBe(0);
+    await play(page).click();
+    await expect(stop(page)).toBeDisabled();
+    expect((await state(request)).requests).toHaveLength(9);
+    expect(await page.evaluate(() => window.__breezeDemo.context.chat.at(-1).mes)).toBe(raw);
+});
+
+test('refresh stops an active stream and only prepares replacement speech', async ({ page, request }) => {
+    await configure(page, { streaming: true });
+    await replaceMessage(page, [speech('第一句正在流式播放。'), speech('重新获取后只生成不播放。')].join('\n'));
+    await play(page).click();
+    await expect.poll(() => page.evaluate(() => window.__controlsStarts.length)).toBeGreaterThan(0);
+    const starts = await page.evaluate(() => window.__controlsStarts.length);
+    await refresh(page).click();
+    await expect(refresh(page)).toBeEnabled();
+    await expect(controls(page).locator('.breeze-message-feedback')).toHaveText('已重新获取 2 段语音。');
+    await expect.poll(async () => (await probe(page, true))?.closed).toBe(true);
+    const result = await state(request);
+    expect(result.requests).toHaveLength(3);
+    expect(result.requests[0].stream).toBe(true);
+    expect(result.requests.slice(1).every(job => !job.stream)).toBe(true);
+    expect(result.cancelled).toEqual([result.requests[0].id]);
+    await page.waitForTimeout(250);
+    expect(await page.evaluate(() => window.__controlsStarts.length)).toBe(starts);
+    expect(await page.evaluate(() => window.__controlsAudio.length)).toBe(0);
+});
+
+for (const action of ['stop', 'chat']) {
+    test(`${action} cancels refresh and prevents a late job from entering caches or playing`, async ({ page, request }) => {
+        await replaceMessage(page, [speech('这一句的响应暂时延迟。'), speech('后续这一句必须取消。')].join('\n'));
+        let release;
+        const held = new Promise(resolve => { release = resolve; });
+        await page.route('**/breeze/jobs', async route => {
+            const response = await route.fetch();
+            await held;
+            await route.fulfill({ response }).catch(() => {});
+        });
+        await refresh(page).click();
+        await expect.poll(async () => (await state(request)).requests.length).toBe(1);
+        await expect(refresh(page)).toBeDisabled();
+        if (action === 'stop') await stop(page).click();
+        else await page.evaluate(() => window.__breezeDemo.switchChat('cancel-refresh-other-chat'));
+        release();
+        await expect(refresh(page)).toBeEnabled();
+        await expect(stop(page)).toBeDisabled();
+        await page.waitForTimeout(250);
+        expect((await state(request)).requests).toHaveLength(1);
+        expect(await page.evaluate(() => window.__controlsAudio.length)).toBe(0);
+        expect(await page.evaluate(() => window.__controlsStarts.length)).toBe(0);
+        expect(await page.evaluate(() => Object.keys(window.__breezeDemo.context.chatMetadata.breeze_voice.cache))).toEqual([]);
+        if (action === 'chat') {
+            const previousControls = await controls(page).elementHandle();
+            await page.evaluate(() => window.__breezeDemo.switchChat('demo-campus-chat'));
+            await expect.poll(() => previousControls.evaluate(node => node.isConnected)).toBe(false);
+            await expect(refresh(page)).toBeEnabled();
+            expect(await page.evaluate(() => Object.keys(window.__breezeDemo.context.chatMetadata.breeze_voice.cache))).toEqual([]);
+        }
+        // Normal playback must make new requests as well; a discarded response
+        // must not survive only in the in-memory cache.
+        await page.unroute('**/breeze/jobs');
+        await play(page).click();
+        await expect.poll(async () => (await state(request)).requests.length).toBe(3);
+        await stop(page).click();
+        const result = await state(request);
+        expect(result.requests.slice(1).map(job => job.text)).toEqual(['这一句的响应暂时延迟。', '后续这一句必须取消。']);
+        const cached = await page.evaluate(() => Object.values(window.__breezeDemo.context.chatMetadata.breeze_voice.cache).map(record => record.id));
+        expect(cached).not.toContain(result.requests[0].id);
+    });
+}

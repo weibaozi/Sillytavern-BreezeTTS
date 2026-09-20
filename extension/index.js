@@ -12,7 +12,7 @@ import { mountStudioEntry } from './menu.js';
 const context = () => window.SillyTavern.getContext();
 const el = (tag, text, cls) => { const node = document.createElement(tag); if (text != null) node.textContent = text; if (cls) node.className = cls; return node; };
 let settings, client, voices = [], studio, dialog, generation = false, epoch = 0, renderTimer;
-let items = new Map(), autoPending = new Set(), consumed = new Set(), designController;
+let items = new Map(), autoPending = new Set(), consumed = new Set(), designController, regeneration;
 let connectionVersion = 0;
 let automaticTimer, allowAutomatic = false;
 let chatObserver, observedChat, rendering = false, generationType = null, continueCutoff = 0, continueMessageId = null;
@@ -173,7 +173,7 @@ function update(item, state, error = '', duration) {
         button.setAttribute('aria-label', `${button.textContent} ${error || item.segment.text}`);
     }
 }
-async function prepare(item, signal, { stream = false } = {}) {
+async function prepare(item, signal, { stream = false, force = false } = {}) {
     checkAbort(signal);
     if (!valid(item)) throw new Error('消息已变化，请重新点击。');
     const voiceId = itemVoice(item);
@@ -184,11 +184,11 @@ async function prepare(item, signal, { stream = false } = {}) {
         throw new Error('当前 Breeze 后端尚不支持旁白克隆，请更新并重启 Breeze WebUI 后重新连接。');
     }
     const key = cacheKey(api.base, request);
-    if (memory.has(key)) {
+    if (!force && memory.has(key)) {
         const audio = memory.get(key); update(item, 'ready', '', audio.duration); return audio;
     }
     const cache = meta().cache;
-    const saved = cache[key];
+    const saved = !force && cache[key];
     if (saved) {
         try {
             const record = await api.request(`/breeze/jobs/${saved.id}`, { signal });
@@ -233,6 +233,8 @@ const player = new SpeechPlayer({ prepare, update, onStateChange: refreshPlaybac
 const automaticQueue = new AutomaticSpeechQueue({ player, isValid: valid,
     onError: error => { allowAutomatic = false; autoPending.clear(); stopPlayback(); if (error.name !== 'AbortError') notice(error.message); } });
 function stopPlayback() {
+    const previous = regeneration; regeneration = null;
+    previous?.controller.abort();
     automaticQueue.stop();
     for (const item of items.values()) if (['playing', 'paused', 'queued', 'running'].includes(item.state)) update(item, 'idle');
     refreshPlaybackControls();
@@ -243,6 +245,8 @@ function refreshPlaybackControls() {
         const messageId = Number(controls.dataset.messageId);
         const ownsPlayback = player.active && active.some(item => item.messageId === messageId)
             || player.paused && automaticQueue.activeItems.some(item => item.messageId === messageId);
+        const refreshTask = regeneration?.messageId === messageId ? regeneration : null;
+        const refreshing = refreshTask && !refreshTask.done;
         const pause = controls.querySelector('.breeze-message-pause'), stop = controls.querySelector('.breeze-message-stop');
         if (pause) {
             pause.disabled = !ownsPlayback;
@@ -250,8 +254,51 @@ function refreshPlaybackControls() {
             pause.setAttribute('aria-pressed', String(Boolean(ownsPlayback && player.paused)));
             pause.title = ownsPlayback && player.paused ? '从暂停处继续播放' : '暂停本条语音队列';
         }
-        if (stop) stop.disabled = !ownsPlayback;
-        controls.dataset.state = ownsPlayback ? player.paused ? 'paused' : 'playing' : 'idle';
+        if (stop) stop.disabled = !ownsPlayback && !refreshing;
+        const refresh = controls.querySelector('.breeze-message-refresh');
+        if (refresh) {
+            const live = generation && liveMessageIds.has(messageId);
+            refresh.disabled = Boolean(refreshing || live);
+            refresh.textContent = refreshing ? `↻ 重新获取中 ${refreshTask.completed}/${refreshTask.items.length}` : '↻ 重新获取';
+            refresh.title = live ? '等待正文生成完成后重新获取全部语音' : '清除本条语音缓存并重新合成对白与旁白，完成后点击播放';
+        }
+        const feedback = controls.querySelector('.breeze-message-feedback');
+        if (feedback) feedback.textContent = refreshTask?.done
+            ? refreshTask.failed ? `已完成，${refreshTask.failed} 段失败，可重新获取重试。` : `已重新获取 ${refreshTask.completed} 段语音。` : '';
+        controls.dataset.state = refreshing ? 'refreshing' : ownsPlayback ? player.paused ? 'paused' : 'playing' : 'idle';
+    }
+}
+async function refreshMessageAudio(messageId) {
+    if (!settings.enabled || generation && liveMessageIds.has(messageId)) return;
+    // Resolve current entries at click time so a redraw never reuses stale fragments.
+    const selected = [...items.values()].filter(item => item.messageId === messageId && valid(item) && itemVoice(item))
+        .sort((a, b) => a.segment.start - b.segment.start);
+    if (!selected.length) { openPanel('characters'); return; }
+    stopPlayback(); allowAutomatic = false; autoPending.clear();
+    stopPreview(); dialog?.querySelectorAll('audio').forEach(audio => audio.pause());
+    const task = { controller: new AbortController(), messageId, items: selected, completed: 0, failed: 0, done: false };
+    regeneration = task;
+    const data = meta(true);
+    for (const item of selected) {
+        const key = cacheKey(client.base, requestFor(item.segment, itemVoice(item), settings));
+        memory.delete(key); delete data.cache[key]; delete item.duration;
+        update(item, 'queued');
+    }
+    context().chatMetadata[KEY] = data; void saveMeta();
+    refreshPlaybackControls();
+    try {
+        for (const item of selected) {
+            checkAbort(task.controller.signal);
+            try { await prepare(item, task.controller.signal, { force: true }); }
+            catch (error) {
+                checkAbort(task.controller.signal);
+                task.failed++; update(item, 'error', error.message);
+            }
+            task.completed++; refreshPlaybackControls();
+        }
+    } catch (error) { if (error.name !== 'AbortError') notice(error.message); }
+    finally {
+        if (regeneration === task) { task.done = true; refreshPlaybackControls(); }
     }
 }
 function invalidate() {
@@ -262,6 +309,7 @@ function invalidate() {
 async function play(item) {
     if (!settings.enabled) return;
     if (!itemVoice(item)) { openPanel('characters'); return; }
+    if (regeneration) stopPlayback();
     if (automaticQueue.busy && player.current?.id !== item.id) { stopPlayback(); allowAutomatic = false; autoPending.clear(); }
     stopPreview(); dialog?.querySelectorAll('audio').forEach(a => a.pause());
     player.volume = Number(settings.volume);
@@ -348,7 +396,10 @@ function insertBubbles(container, messageItems, pending = []) {
     const stop = el('button', '■ 停止', 'breeze-control breeze-message-stop'); stop.type = 'button'; stop.disabled = true;
     stop.title = '结束播放并清空当前语音队列';
     stop.addEventListener('click', () => { allowAutomatic = false; autoPending.clear(); stopPlayback(); });
-    if (messageItems.length) { controls.append(all, pause, stop); tray.append(controls); }
+    const refresh = el('button', '↻ 重新获取', 'breeze-control breeze-message-refresh'); refresh.type = 'button';
+    refresh.addEventListener('click', () => { void refreshMessageAudio(Number(controls.dataset.messageId)); });
+    const feedback = el('span', '', 'breeze-message-feedback'); feedback.setAttribute('role', 'status');
+    if (messageItems.length) { controls.append(all, pause, stop, refresh, feedback); tray.append(controls); }
     for (const item of fallback) {
         const row = el('div', null, 'breeze-fallback');
         if (!settings.hideTags) row.append(el('span', item.segment.raw, 'breeze-original'));
@@ -424,7 +475,8 @@ function renderMessages(onlyMessageId) {
         }
     }
     items = next;
-    if (automaticQueue.activeItems.some(item => !valid(item)) || (player.current && !valid(player.current))) stopPlayback();
+    if (automaticQueue.activeItems.some(item => !valid(item)) || (player.current && !valid(player.current))
+        || regeneration?.items.some(item => !valid(item))) stopPlayback();
     for (const item of items.values()) update(item, item.state, item.error, item.duration);
     refreshPlaybackControls();
     if (onlyMessageId == null || !generation) {

@@ -121,7 +121,7 @@ test('narrator selection and emotion belong to the chat, survive reload, and lea
     expect(await injection(page)).toBe(prompt);
 });
 
-test('narration target is chat-bound and streaming packs complete sentences up to that target', async ({ page, request }) => {
+test('narration target is chat-bound and streaming counts across line breaks without making extra requests', async ({ page, request }) => {
     await setNarrator(page);
     await openStudio(page);
     const prompt = await injection(page);
@@ -140,17 +140,21 @@ test('narration target is chat-bound and streaming packs complete sentences up t
     await configure(page, { readStreamingText: true, autoGenerate: true });
     await begin(page);
     const first = '甲'.repeat(17) + '。', second = '乙'.repeat(13) + '。', third = '丙'.repeat(12) + '。';
-    await progress(page, first + second);
+    const prefix = first + '\n\n' + second + '\n';
+    await progress(page, prefix);
     await page.waitForTimeout(350);
     expect(await requests(request)).toHaveLength(0);
-    await progress(page, first + second + third.slice(0, 4));
-    await expect.poll(async () => (await requests(request)).map(job => job.text)).toEqual([first + second]);
-    await progress(page, first + second + third);
+    await progress(page, prefix + third.slice(0, 3));
+    await page.waitForTimeout(350);
+    expect(await requests(request)).toHaveLength(0);
+    await progress(page, prefix + third.slice(0, 4));
+    await expect.poll(async () => (await requests(request)).map(job => job.text)).toEqual([first + ' ' + second]);
+    await progress(page, prefix + third);
     await finish(page);
-    await expect.poll(async () => (await requests(request)).map(job => job.text)).toEqual([first + second, third]);
+    await expect.poll(async () => (await requests(request)).map(job => job.text)).toEqual([first + ' ' + second, third]);
 });
 
-test('play message interleaves narration and tagged dialogue while ignoring quotations and non-story modules', async ({ page, request }) => {
+test('play message reads untagged quotations as narration while retaining tagged speakers and non-story exclusions', async ({ page, request }) => {
     await setNarrator(page, narratorVoice, '平静地讲述，语速稍慢');
     const raw = [
         '<!-- 1.正文前的格式 -->', '开场格式说明不应朗读。',
@@ -173,9 +177,9 @@ test('play message interleaves narration and tagged dialogue while ignoring quot
     await tray(page).click();
     await expect.poll(async () => (await requests(request)).length).toBe(5);
     expect((await requests(request)).map(job => [job.text, job.voice_id, job.emotion])).toEqual([
-        ['阳光照进教室。', narratorVoice, '平静地讲述，语速稍慢'],
+        ['阳光照进教室。 “先去吃饭吧。”', narratorVoice, '平静地讲述，语速稍慢'],
         ['先去吃饭吧。', '1'.repeat(32), 'happy'],
-        ['她合上课本。', narratorVoice, '平静地讲述，语速稍慢'],
+        ['她合上课本。 “这是没有标记的对白。” "This is another untagged quote."', narratorVoice, '平静地讲述，语速稍慢'],
         ['我带路。', '2'.repeat(32), 'softly reassuring'],
         ['两人走向门口。', narratorVoice, '平静地讲述，语速稍慢'],
     ]);
@@ -313,9 +317,13 @@ test('automatic streamed audio starts with narration and retains narration-dialo
     await begin(page);
     let raw = '教室门被推开。\n';
     await progress(page, raw);
+    await page.waitForTimeout(350);
+    expect(await requests(request)).toHaveLength(0);
+    raw += '[TTSVoice:';
+    await progress(page, raw);
     await expect.poll(() => page.evaluate(() => window.__narrationAudioStarts.length)).toBeGreaterThan(0);
     expect(await page.evaluate(() => window.__breezeDemo.context.streamingProcessor.isFinished)).toBe(false);
-    raw += speech('周启明', '我来晚了。') + '\n他快步走向座位。';
+    raw += '周启明:happy:我来晚了。]' + '\n他快步走向座位。';
     await progress(page, raw);
     await finish(page);
     await expect.poll(async () => (await state(request)).streamEvents.filter(event => event.type === 'done').length).toBe(3);

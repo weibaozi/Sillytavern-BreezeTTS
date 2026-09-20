@@ -19,12 +19,16 @@ q.breeze-dialogue::before, q.breeze-dialogue::after { content: none; }
     transition: background-color .15s, opacity .15s;
 }
 #chat .breeze-message-controls > button.breeze-message-play { color: #243d2b; background: #d9eac0; border-color: #c2d5ad; }
+#chat .breeze-message-controls > button.breeze-message-refresh { color: #d4dacb; background: #303b30; border-color: #53604a; }
 #chat .breeze-message-controls > button.breeze-control:hover:enabled { background: #3d4937; color: #edf0e7; }
 #chat .breeze-message-controls > button.breeze-message-play:hover:enabled { background: #c7ddb0; color: #243d2b; }
 #chat .breeze-message-controls > button.breeze-control:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor, #d7c698); outline-offset: 3px; }
 #chat .breeze-message-controls > button.breeze-control:disabled { opacity: .42; cursor: not-allowed; }
+#chat .breeze-message-controls > button.breeze-message-refresh:disabled { opacity: .72; cursor: progress; }
 #chat .breeze-message-controls > button.breeze-message-pause[aria-pressed="true"] { color: #f1dfba; background: #4a4031; border-color: #8b795c; }
 #chat .breeze-message-controls > button.breeze-control[hidden] { display: none; }
+#chat .breeze-message-controls > .breeze-message-feedback { flex: 1 0 100%; min-width: 0; color: var(--SmartThemeBodyColor, #c4ceba); opacity: .72; font-size: .92em; line-height: 1.55; overflow-wrap: anywhere; }
+#chat .breeze-message-controls > .breeze-message-feedback:empty { display: none; }
 .breeze-fallback { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .breeze-fallback span { opacity: .7; }
 .breeze-fallback .breeze-dialogue { opacity: 1; }

@@ -17,14 +17,14 @@ test('narration interleaves with single-copy dialogue by original offsets', () =
     }
 });
 
-test('quoted legacy/user/skipped dialogue is never read as narration', () => {
+test('ordinary quoted text is narration while every TTS tag remains excluded', () => {
     const raw = '他抬起头。“走吧。”\n[TTSVoice:A:happy:走吧。]\n包子说："等一下。"\n她答道：‘好的。’ 然后转身。\n「明天见。」\n『再见。』\n[TTSVoice:包子:default:用户对白。]\n[TTSVoice:{{user}}:default:用户对白。]';
-    assert.deepEqual(texts(raw), ['他抬起头。', '包子说：', '她答道：', '然后转身。']);
+    assert.deepEqual(texts(raw), ['他抬起头。“走吧。”', '包子说："等一下。" 她答道：‘好的。’ 然后转身。 「明天见。」 『再见。』']);
 });
 
-test('English apostrophes remain prose and contractions inside speech stay excluded', () => {
+test('English quotations and apostrophes remain ordinary prose', () => {
     const raw = "The student's notebook isn't here. He said 'Don't do that!' and left. It’s late.";
-    assert.deepEqual(texts(raw), ["The student's notebook isn't here. He said", 'and left. It’s late.']);
+    assert.deepEqual(texts(raw), [raw]);
 });
 
 test('body markers exclude before/after modules and previous AI transcript', () => {
@@ -39,7 +39,7 @@ test('nested modules, unfinished modules, comments and code do not become narrat
         '<thinking>思考。</thinking><status>状态。</status><statusbar>状态栏。</statusbar><options>选项。</options>' +
         '<script>alert("hello")</script><style>body{}</style><pre>代码。</pre><code>代码。</code>' +
         '<blockquote>引用。</blockquote><q>对白。</q><!-- 注释。 -->\n```text\n代码。\n```\n`行内。`\n``内含 ` 的代码。``\n尾声。';
-    assert.deepEqual(texts(raw), ['正文。', '尾声。']);
+    assert.deepEqual(texts(raw), ['正文。', '引用。 对白。', '尾声。']);
     for (const suffix of ['<w2g>未完。', '<thinking>未完。', '<ai_last_output>回显。', '<!-- 注释。', '`行内未完。', '```text\n代码。']) {
         assert.deepEqual(texts(`正文。${suffix}`, true), ['正文。'], suffix);
         assert.deepEqual(texts(`正文。${suffix}`), ['正文。'], suffix);
@@ -66,33 +66,35 @@ test('literal structure tags inside code and previous transcripts cannot control
 test('formatting and common/numeric HTML entities retain visible words without URLs or images', () => {
     const raw = '# 清晨\n**他**走向[图书馆](https://example.test/a_(b))。\n' +
         '![不朗读图片文字](https://example.test/img.png)\n<span class="orange">风 &amp; 雨&#x3002;</span><br>' +
-        '温度为&#50;&#48;度。 https://example.test/url。\n<img src="picture.png" alt="不念图片">\n1. 天色渐亮。';
-    assert.deepEqual(texts(raw), ['清晨', '他走向图书馆。', '风 & 雨。', '温度为20度。', '天色渐亮。']);
+        '温度为&#50;&#48;度。 https://example.test/url\n<img src="picture.png" alt="不念图片">\n1. 天色渐亮。';
+    assert.deepEqual(texts(raw), ['清晨 他走向图书馆。', '风 & 雨。 温度为20度。', '天色渐亮。']);
 });
 
-test('Markdown reference media and block quotations are silent', () => {
-    assert.deepEqual(texts('旁白。\n> 被引用的台词。\n![图片][ref]\n[ref]: https://example.test/img.png\n尾声。'), ['旁白。', '尾声。']);
+test('Markdown quotations and reference labels stay visible but destinations and images remain silent', () => {
+    assert.deepEqual(texts('旁白。\n> 被引用的台词。\n![图片][ref]\n[ref]: https://example.test/img.png\n尾声。'), ['旁白。 被引用的台词。', '尾声。']);
+    assert.deepEqual(texts('他查看[学校地图][map]，然后离开。\n[map]: https://example.test/map'), ['他查看学校地图，然后离开。']);
+    assert.equal(texts('查看https://example.test。然后离开。').join(''), '查看。然后离开。', 'removing a URL does not remove following prose punctuation');
 });
 
-test('entity-encoded quote delimiters exclude dialogue without stripping apostrophes', () => {
-    assert.deepEqual(texts('他说&quot;不要读这句对白。&quot;然后走了。'), ['他说', '然后走了。']);
-    assert.deepEqual(texts('他说&#x201c;不要读这句对白。&#8221;然后走了。'), ['他说', '然后走了。']);
+test('entity-encoded quote delimiters retain all ordinary quoted content', () => {
+    assert.deepEqual(texts('他说&quot;这句也要读。&quot;然后走了。'), ['他说"这句也要读。"然后走了。']);
+    assert.deepEqual(texts('他说&#x201c;这句也要读。&#8221;然后走了。'), ['他说“这句也要读。”然后走了。']);
     assert.deepEqual(texts('The student&#39;s notebook isn&apos;t here.'), ["The student's notebook isn't here."]);
 });
 
 test('malformed, nested and incomplete voice tags never become narration', () => {
     for (const tag of ['[TTSVoice:A:happy:[笑]台词。]', '[ttsvoice:包子:happy:台词。]', '[TTS Voice:A:happy:台词。]',
         '[TTSVoice::happy:台词。]', '[TTSVoice:A:happy:台词。[未闭合]', '[TTSVoice:A:happy:跨\n行。]', '[TTSVo']) {
-        assert.deepEqual(texts(`正文。\n${tag}`, true), ['正文。'], tag);
+        assert.deepEqual(texts(`正文。\n${tag}`, true), tag === '[TTSVo' ? [] : ['正文。'], tag);
         assert.deepEqual(texts(`正文。\n${tag}`), ['正文。'], tag);
     }
     const raw = '[TTSVoice:A:happy:未闭合\n[TTSVoice:B:happy:完整。]\n真实旁白。';
     assert.deepEqual(texts(raw), ['真实旁白。']);
 });
 
-test('streaming groups short sentences and flushes paragraphs or speech boundaries', () => {
+test('streaming groups short sentences across paragraphs and flushes speech boundaries', () => {
     assert.deepEqual(texts('他走进教室。她正低头', true), []);
-    assert.deepEqual(texts('他走进教室。她正低头\n', true), ['他走进教室。她正低头']);
+    assert.deepEqual(texts('他走进教室。她正低头\n', true), []);
     assert.deepEqual(texts('他走进教室。她正低头'), ['他走进教室。她正低头']);
     assert.deepEqual(texts('他回头[TTSVoice:A:default:你好。]', true), ['他回头']);
 });
@@ -103,9 +105,10 @@ test('pending HTML/link syntax cannot change previously committed narration', ()
         ['他[看到了。]', '，然后离开。'], ['他[走向图书馆](https://ex', 'ample.test)。'],
     ]) {
         assert.deepEqual(texts(prefix, true), [], prefix);
-        assert.ok(texts(prefix + suffix + '\n', true).length > 0, suffix);
+        assert.ok(texts(prefix + suffix + '[TTSVoice:A:default:对白。]', true).length > 0, suffix);
     }
-    assert.deepEqual(texts('他说“未说完。', true), ['他说']);
+    assert.deepEqual(texts('他说“未说完。', true), []);
+    assert.deepEqual(texts('他说“未说完。'), ['他说“未说完。']);
 });
 
 test('append-only streaming keeps every committed segment byte-for-byte stable', () => {
@@ -120,19 +123,19 @@ test('append-only streaming keeps every committed segment byte-for-byte stable',
     }
     const final = parseNarration(raw);
     assert.deepEqual(final.slice(0, committed.length), committed);
-    assert.equal(final.at(-1).text, '末尾半句');
+    assert.ok(final.at(-1).text.endsWith('末尾半句'));
 });
 
-test('streaming entity-quoted speech remains excluded from its opening delimiter', () => {
-    const raw = '他说&quot;不要读这句对白。&quot;然后走了。';
+test('streaming entity-quoted content stays ordinary narration without unstable partial entities', () => {
+    const raw = '他说&quot;这句也要读。&quot;然后走了。';
     let committed = [];
     for (let end = 1; end <= raw.length; end++) {
         const next = parseNarration(raw.slice(0, end), '', { streaming: true });
         assert.deepEqual(next.slice(0, committed.length), committed, `prefix at ${end}`);
         committed = next;
     }
-    assert.deepEqual(committed.map(s => s.text), ['他说']);
-    assert.deepEqual(parseNarration(raw).map(s => s.text), ['他说', '然后走了。']);
+    assert.deepEqual(committed, []);
+    assert.deepEqual(parseNarration(raw).map(s => s.text), ['他说"这句也要读。"然后走了。']);
 });
 
 test('target settings normalize finite numeric values and reject invalid input', () => {
@@ -152,7 +155,7 @@ test('target chunks use the longest complete sentence sequence inside the target
     assert.deepEqual(texts(raw), [sentences.slice(0, 3).join(''), sentences[3]]);
     assert.deepEqual(parseNarration(raw, '', { targetChars: 60 }).map(s => s.text), [sentences[0] + sentences[1], sentences[2] + sentences[3]]);
     assert.deepEqual(parseNarration(raw, '', { targetChars: 'invalid' }), parseNarration(raw));
-    assert.deepEqual(texts(sentences[0] + '\n' + sentences[1]), [sentences[0], sentences[1]]);
+    assert.deepEqual(texts(sentences[0] + '\n' + sentences[1]), [sentences[0] + ' ' + sentences[1]]);
     assert.deepEqual(texts(sentences[0] + '[TTSVoice:A:default:对白。]' + sentences[1]), [sentences[0], sentences[1]]);
 });
 
@@ -186,6 +189,35 @@ test('target counting uses spoken Unicode characters, not source markup or entit
     assert.ok(segments[0].end <= segments[1].start);
 });
 
+test('line breaks and HTML paragraph layout share one target counter without counting their separators', () => {
+    const first = '甲'.repeat(49) + '。';
+    const second = '乙'.repeat(49) + '。';
+    const third = '丙'.repeat(29) + '。';
+    for (const separator of ['\n', '\r\n\n', ' \n   ', '<br>', '</p><p>', '</div><div>', '\n> ', '\n\n## ']) {
+        const raw = first + separator + second + separator + third;
+        const result = parseNarration(raw);
+        assert.deepEqual(result.map(s => s.text), [first + ' ' + second, third], separator);
+        assert.equal(Array.from(result[0].text).length, 101, 'layout space is rendered but does not consume the 100-character target');
+        assert.deepEqual(texts(first + separator, true), [], separator);
+        assert.deepEqual(texts(first + separator + second, true), [first + ' ' + second], separator);
+        for (const segment of result) assert.equal(segment.raw, raw.slice(segment.start, segment.end));
+    }
+    assert.deepEqual(texts('Hello\n\nworld.'), ['Hello world.'], 'English words retain a separator');
+});
+
+test('ordinary quote containers never remove visible body text or disturb the TTS boundary', () => {
+    const raw = '他把这叫作“春天的气味”。\n<blockquote>里面是<q>普通引文</q>。</blockquote>\n' +
+        '> 这不是角色对白。\n[TTSVoice:A:default:只有这句按角色播放。]\n然后他说"不管怎样"，事情已经过去。';
+    const narration = parseNarration(raw);
+    assert.deepEqual(narration.map(s => s.text), [
+        '他把这叫作“春天的气味”。 里面是普通引文。 这不是角色对白。',
+        '然后他说"不管怎样"，事情已经过去。',
+    ]);
+    const dialogue = parseTTS(raw).segments[0];
+    assert.ok(narration[0].end <= dialogue.start);
+    assert.ok(dialogue.end <= narration[1].start);
+});
+
 test('target-based streaming matches final parsing without overlap or revised committed chunks', () => {
     const prefix = '甲'.repeat(14) + '。';
     const cases = [
@@ -205,6 +237,15 @@ test('target-based streaming matches final parsing without overlap or revised co
         prefix + '他[引用标签。][ref]然后离开。',
         prefix + '然后。\n下一段开始。',
         prefix + '\\\\路径继续。转身离开。',
+        prefix + '\n乙'.repeat(2) + '。\n\n继续向前。再读下一句。',
+        prefix + ' \n   然后。<br>下一段。</p><p>继续。',
+        prefix + '<blockquote>引用了<q>普通文字</q>。</blockquote>继续。',
+        prefix + '\n> 引用文字。\n>> 仍应朗读。接着向前。',
+        prefix + '说到“普通引号里的说明”，他停了一下。下一句。',
+        '甲'.repeat(9) + '。\n\n' + '乙'.repeat(9) + '。\n' + '丙'.repeat(9) + '。',
+        prefix + ' \n' + '乙'.repeat(4) + '。后文。',
+        prefix + ' <p>\n' + '乙'.repeat(4) + '。</p><p>后文。</p>',
+        '“' + '甲'.repeat(18) + '。”\n接着读后文。',
     ];
     for (const raw of cases) {
         let committed = [];
