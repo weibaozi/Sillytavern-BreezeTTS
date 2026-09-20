@@ -9,6 +9,8 @@ import { parseNarration, normalizeNarrationTargetChars } from './narration.js';
 import { createStudioPanel } from './panel.js';
 import { mountStudioEntry } from './menu.js';
 import { createFloatingControls } from './floating-controls.js';
+import { applyTextFilters, normalizeTextFilters } from './text-filters.js';
+import { createTextFilterEditor } from './text-filter-editor.js';
 
 const context = () => window.SillyTavern.getContext();
 const el = (tag, text, cls) => { const node = document.createElement(tag); if (text != null) node.textContent = text; if (cls) node.className = cls; return node; };
@@ -38,6 +40,7 @@ function itemVoice(item) {
     const { voiceId, fetchMode } = narratorConfig();
     return fetchMode !== 'off' && voices.some(voice => voice.id === voiceId) ? voiceId : null;
 }
+function hasSpeech(item) { return Boolean(applyTextFilters(item.segment.text, settings.textFilters).trim()); }
 
 function meta(create = false) {
     const ctx = context();
@@ -172,12 +175,13 @@ function update(item, state, error = '', duration) {
     if (state === 'ready' && ['playing', 'paused'].includes(previousState)) {
         playbackCursor = { messageId: item.messageId, itemId: item.id, offset: Number(item.duration) || 0 };
     }
-    const labels = { idle: '▶', queued: '排队', running: '生成中', ready: '▶', playing: '暂停', paused: '继续', error: '重试', unmapped: '未映射' };
+    const labels = { idle: '▶', queued: '排队', running: '生成中', ready: '▶', playing: '暂停', paused: '继续', error: '重试', unmapped: '未映射', filtered: '已过滤' };
     for (const button of document.querySelectorAll('.breeze-bubble')) {
         if (button.dataset.item !== item.id) continue;
         button.textContent = `${item.segment.speaker} · ${labels[state] || state}${item.duration ? ` ${item.duration.toFixed(1)}s` : ''}`;
         button.dataset.state = state;
-        button.title = error || `${item.segment.emotion}：${item.segment.text}`;
+        button.disabled = state === 'filtered';
+        button.title = state === 'filtered' ? '文本过滤后为空，跳过语音。' : error || `${item.segment.emotion}：${item.segment.text}`;
         button.setAttribute('aria-label', `${button.textContent} ${error || item.segment.text}`);
     }
     if (!rendering) refreshPlaybackControls();
@@ -189,6 +193,7 @@ async function prepare(item, signal, { stream = false, force = false } = {}) {
     if (!voiceId) throw new Error('尚未绑定有效音色，请在 Breeze 语音面板中选择。');
     const api = client;
     const request = requestFor(item.segment, voiceId, settings);
+    if (!request.text.trim()) throw new Error('文本过滤后为空，跳过语音。');
     if (request.speech_mode === 'clone' && !supportsCloning) {
         throw new Error('当前 Breeze 后端尚不支持旁白克隆，请更新并重启 Breeze WebUI 后重新连接。');
     }
@@ -257,7 +262,7 @@ function refreshPlaybackControls() {
     }
     const grouped = new Map();
     for (const item of items.values()) {
-        if (!valid(item)) continue;
+        if (!valid(item) || !hasSpeech(item)) continue;
         if (!grouped.has(item.messageId)) grouped.set(item.messageId, []);
         grouped.get(item.messageId).push(item);
     }
@@ -327,7 +332,7 @@ function messageTimeline(entries) {
 function currentMessageItems(messageId) {
     if (!settings.enabled || floatingChat !== chatKey(context()) || !Number.isInteger(messageId)) return [];
     render(messageId);
-    return [...items.values()].filter(item => item.messageId === messageId && valid(item) && itemVoice(item))
+    return [...items.values()].filter(item => item.messageId === messageId && valid(item) && itemVoice(item) && hasSpeech(item))
         .sort((a, b) => a.segment.start - b.segment.start);
 }
 function playbackError(error, messageId) {
@@ -411,6 +416,7 @@ function invalidate() {
 }
 async function play(item) {
     if (!settings.enabled) return;
+    if (!hasSpeech(item)) { update(item, 'filtered'); return; }
     if (!itemVoice(item)) { openPanel('characters'); return; }
     if (regeneration) stopPlayback();
     if (automaticQueue.busy && player.current?.id !== item.id) { stopPlayback(); allowAutomatic = false; autoPending.clear(); }
@@ -527,14 +533,16 @@ function renderMessages(onlyMessageId) {
                 swipe: msg.swipe_id ?? 0, segment, epoch, state: 'idle' };
             item.displayText = displayDialogue(segment.text, settings.vocalEvents);
             item.legacyDialogue = hasLegacyDialogue(msg.mes, segment, index ? segments[index - 1].end : 0, settings.vocalEvents);
-            if (!mappedVoice(meta().mappings, segment.speaker, voices)) item.state = 'unmapped';
-            else if (item.state === 'unmapped') item.state = 'idle';
+            if (!hasSpeech(item)) { item.state = 'filtered'; delete item.duration; }
+            else if (!mappedVoice(meta().mappings, segment.speaker, voices)) item.state = 'unmapped';
+            else if (['unmapped', 'filtered'].includes(item.state)) item.state = 'idle';
             next.set(id, item); return item;
         });
         const narrator = narratorConfig();
         const narration = narrator.fetchMode !== 'off' && voices.some(voice => voice.id === narrator.voiceId)
             ? parseNarration(msg.mes, ctx.name1, { streaming: live, targetChars: narrator.targetChars }) : [];
         for (const segment of narration) {
+            if (!applyTextFilters(segment.text, settings.textFilters).trim()) continue;
             segment.emotion = narrator.emotion;
             segment.speechMode = narrator.mode;
             const id = JSON.stringify([key, messageId, msg.swipe_id ?? 0, epoch, 'narration', segment.start, segment.raw]);
@@ -681,6 +689,11 @@ function openPanel(tab) {
 }
 function buildPanel() {
     studio = createStudioPanel(); dialog = studio.dialog;
+    createTextFilterEditor({ root: dialog.querySelector('[data-text-filter-editor]'), rules: settings.textFilters,
+        onSave: rules => {
+            invalidate(); settings.textFilters = normalizeTextFilters(rules); saveSettings();
+            clearTimeout(renderTimer); renderTimer = null; render();
+        } });
     dialog.addEventListener('close', () => {
         stopPreview(); dialog.querySelectorAll('audio').forEach(a => a.pause());
         document.querySelector('#extensionsMenuButton')?.focus();
@@ -948,7 +961,7 @@ function automatic(ids) {
         // On-demand narration joins actual playback, never generate-only background work.
         if (item.segment.kind === 'narration' && narratorConfig().fetchMode !== 'auto' && !settings.autoPlay) continue;
         consumed.add(item.id);
-        if (!itemVoice(item) || !valid(item)) continue;
+        if (!itemVoice(item) || !valid(item) || !hasSpeech(item)) continue;
         let queued = item;
         if (generationType === 'continue' && item.messageId === continueMessageId && item.segment.kind === 'narration'
             && item.segment.start < continueCutoff) {
@@ -961,6 +974,7 @@ function automatic(ids) {
             queued = { ...item, id: JSON.stringify([item.id, 'continue', continueCutoff]),
                 segment: { ...item.segment, start: continueCutoff, raw, text } };
         }
+        if (!hasSpeech(queued)) continue;
         selected.push(queued); update(queued, 'queued');
     }
     if (consumed.size > 2000) consumed = new Set([...consumed].slice(-1000));
@@ -991,6 +1005,7 @@ function recordStreamingMessage() {
 function init() {
     const ctx = context();
     settings = { ...DEFAULTS, ...PROMPT_DEFAULTS, ...ctx.extensionSettings[KEY] };
+    settings.textFilters = normalizeTextFilters(settings.textFilters);
     const upgradePrompt = typeof settings.tagRenderPromptTemplate !== 'string'
         || settings.tagRenderPromptTemplate === PREVIOUS_TAG_RENDER_TEMPLATE;
     settings.promptTemplate = upgradePrompt ? DEFAULT_TEMPLATE : settings.tagRenderPromptTemplate;

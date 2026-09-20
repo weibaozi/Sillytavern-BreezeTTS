@@ -1,8 +1,10 @@
 // Pure text/state helpers: no SillyTavern imports and no DOM mutations.
+import { DEFAULT_TEXT_FILTERS, applyTextFilters } from './text-filters.js';
 export const KEY = 'breeze_voice';
 export const DEFAULTS = Object.freeze({
     enabled: true, baseUrl: 'http://127.0.0.1:7860', autoGenerate: false,
     autoPlay: false, streaming: false, readStreamingText: false, floatingControlsCollapsed: false, volume: 0.8, hideTags: true, cfgScale: 4, seed: 42,
+    textFilters: DEFAULT_TEXT_FILTERS,
 });
 
 export function excludedText(raw, streaming = false) {
@@ -184,11 +186,12 @@ export function mappedVoice(mappings, speaker, voices) {
 }
 
 export function requestFor(segment, voiceId, settings) {
+    const text = applyTextFilters(segment.text, settings.textFilters);
     if (segment.kind === 'narration' && segment.speechMode === 'clone') {
-        return { kind: 'speech', voice_id: voiceId, text: segment.text, speech_mode: 'clone', emotion: '',
+        return { kind: 'speech', voice_id: voiceId, text, speech_mode: 'clone', emotion: '',
             cfg_scale: 1, seed: Number(settings.seed) };
     }
-    return { kind: 'speech', voice_id: voiceId, text: segment.text, emotion: /^new$/i.test(segment.emotion) ? 'default' : segment.emotion,
+    return { kind: 'speech', voice_id: voiceId, text, emotion: /^new$/i.test(segment.emotion) ? 'default' : segment.emotion,
         cfg_scale: Number(settings.cfgScale), seed: Number(settings.seed) };
 }
 

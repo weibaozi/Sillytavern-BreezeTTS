@@ -15,5 +15,7 @@
   "player.js",
   "prompt.js",
   "stream-player.js",
-  "style.css"
+  "style.css",
+  "text-filter-editor.js",
+  "text-filters.js"
 ]

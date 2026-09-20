@@ -1,4 +1,4 @@
-# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.12
+# SillyTavern Breeze 角色语音 · 0.7.0-tag-render.13
 
 模型只写一份 `[TTSVoice:角色名:情绪:对白]`，插件在显示层把它呈现为普通引号对白和播放气泡。原始聊天 `mes` 保持不变，已绑定角色连接原 Breeze WebUI 合成及播放；未绑定角色仍显示对白，仅跳过语音。原有独立工作室、音色库、流式播放、语气词设置和共享语料库保留。
 
@@ -29,7 +29,7 @@
 
 ### 手动安装与开发目录
 
-也可以执行 `python tools/package.py` 生成 `dist/sillytavern-breeze-0.7.0-tag-render.12.zip`，解压到酒馆用户的 `extensions/` 下；或在 Windows 从源码目录运行：
+也可以执行 `python tools/package.py` 生成 `dist/sillytavern-breeze-0.7.0-tag-render.13.zip`，解压到酒馆用户的 `extensions/` 下；或在 Windows 从源码目录运行：
 
 ```powershell
 .\install.ps1 -SillyTavernPath 'C:\path\to\SillyTavern' -InstallExperimental
@@ -86,6 +86,12 @@
 机制参考 [EchoCore 的提示词注入器](https://github.com/haide-D/SillyTavern-EchoCore/blob/main/frontend/js/prompt_injector.js)，实际参数及生成事件按本机酒馆源码校验。原手工模板保留在 `prompts/` 供对照。
 
 
+### 文本过滤
+
+在「连接与播放 → 文本过滤」添加、编辑、开关或删除规则，点击「保存规则」生效，所有聊天共用。默认一条 `……` → 空格；当前只支持逐项匹配原样文本并替换为空格，不按正则表达式处理。最多 64 条规则，每条最多 500 个字符，按列表顺序执行；删空并保存表示关闭全部过滤，恢复默认会回到省略号规则。
+
+过滤应用于角色对白与旁白的合成请求，支持手动、自动、流式、重新获取及进度定位。原始聊天、可见正文、注入预设与声音设计参考文字保持原样。缓存按过滤后文本匹配，修改规则会停止当前队列；过滤后整段为空则跳过，角色气泡显示「已过滤」，其余片段继续播放。
+
 ## 旁白朗读
 
 0.7.0-tag-render.5 需要同时更新并重启 Breeze 后端，再刷新酒馆。插件通过健康接口确认真正的克隆支持；旧后端会提示更新，不会静默按声音方向合成。角色对白仍使用原来的情绪控制，预设不变。
@@ -128,6 +134,8 @@
 - 消息内新角色「就地绑定／跳过」和可配置语气词预设组仍在计划中。自动 prompt 注入已实现。
 
 ## 验证状态
+
+0.7.0-tag-render.13：新增多规则文本过滤，默认将省略号「……」替换为空格；角色和旁白合成统一使用过滤后的文本，全空内容跳过请求。
 
 0.7.0-tag-render.12：新增随聊天保存的旁白获取方式：不获取、播放时获取、自动获取；新旧聊天默认播放时获取。
 
